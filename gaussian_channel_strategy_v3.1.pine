@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
@@ -16,8 +16,8 @@ mult = input.float(1.414, title="Filtered True Range Multiplier", minval=0)
 modeLag = input.bool(false, title="Reduced Lag Mode")
 modeFast = input.bool(false, title="Fast Response Mode")
 
-// Pyramiding Controls
-atrSpacing = input.float(0.5, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
+// Pyramiding Controls (currently disabled)
+atrSpacing = input.float(0.1, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
 
 // === ATR AND PYRAMIDING VARIABLES ===
 atr = ta.atr(14)
@@ -103,12 +103,18 @@ greenChannel = filt > filt[1]
 inDateRange = time >= startDate and time <= endDate
 
 // === ENTRY AND EXIT CONDITIONS ===
-// Base entry condition (first position)
-baseEntryCondition = inDateRange and greenChannel and close > hband and strategy.position_size == 0
+// Early breakout trigger (touch upper band) - works in any channel color
+earlyBreakout = high > hband and inDateRange
 
-// Pyramiding condition (additional positions)
+// Original entry condition (close above band) - works in any channel color
+normalEntry = close > hband and inDateRange
+
+// Base entry condition (first position) - triggers on either condition
+baseEntryCondition = (earlyBreakout or normalEntry) and strategy.position_size == 0
+
+// Pyramiding condition (additional positions) - CURRENTLY DISABLED
 atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (close - lastEntryPrice) / atr
-canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and greenChannel and close > hband and inDateRange
+canPyramid = false // strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and (earlyBreakout or normalEntry)
 
 // Combined entry logic
 longCondition = baseEntryCondition or canPyramid
@@ -119,7 +125,7 @@ exitCondition = close < hband
 // === STRATEGY EXECUTION ===
 if longCondition
     strategy.entry("Long", strategy.long)
-    lastEntryPrice := close  // Track this entry price for next pyramid calculation
+    lastEntryPrice := close  // Track entry price for potential future pyramiding
 
 if exitCondition and strategy.position_size > 0
     strategy.close_all()
@@ -152,8 +158,8 @@ if barstate.islast
     table.cell(infoTable, 1, 4, str.tostring(math.round(atr, 2)), text_color=color.black)
     table.cell(infoTable, 0, 5, "Green Channel", text_color=color.black)
     table.cell(infoTable, 1, 5, greenChannel ? "✓" : "✗", text_color=greenChannel ? color.green : color.red)
-    table.cell(infoTable, 0, 6, "Position Units", text_color=color.black)
-    table.cell(infoTable, 1, 6, str.tostring(math.round(strategy.position_size / (strategy.initial_capital * 0.1), 0)), text_color=strategy.position_size > 0 ? color.green : color.gray)
+    table.cell(infoTable, 0, 6, "Position", text_color=color.black)
+    table.cell(infoTable, 1, 6, strategy.position_size > 0 ? "Long" : "Flat", text_color=strategy.position_size > 0 ? color.green : color.gray)
     table.cell(infoTable, 0, 7, "Last Entry", text_color=color.black)
     table.cell(infoTable, 1, 7, na(lastEntryPrice) ? "None" : str.tostring(math.round(lastEntryPrice, 2)), text_color=color.black)
     table.cell(infoTable, 0, 8, "In Date Range", text_color=color.black)
