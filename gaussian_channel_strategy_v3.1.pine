@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy v3.1 Demo", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
@@ -16,6 +16,12 @@ mult = input.float(1.414, title="Filtered True Range Multiplier", minval=0)
 modeLag = input.bool(false, title="Reduced Lag Mode")
 modeFast = input.bool(false, title="Fast Response Mode")
 
+// Pyramiding Controls
+atrSpacing = input.float(0.5, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
+
+// === ATR AND PYRAMIDING VARIABLES ===
+atr = ta.atr(14)
+var float lastEntryPrice = na
 
 
 // === GAUSSIAN CHANNEL FUNCTIONS (Pine Script v6) ===
@@ -97,15 +103,27 @@ greenChannel = filt > filt[1]
 inDateRange = time >= startDate and time <= endDate
 
 // === ENTRY AND EXIT CONDITIONS ===
-longCondition = inDateRange and greenChannel and close > hband
+// Base entry condition (first position)
+baseEntryCondition = inDateRange and greenChannel and close > hband and strategy.position_size == 0
+
+// Pyramiding condition (additional positions)
+atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (close - lastEntryPrice) / atr
+canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and greenChannel and close > hband and inDateRange
+
+// Combined entry logic
+longCondition = baseEntryCondition or canPyramid
+
+// Exit condition (closes all positions)
 exitCondition = close < hband
 
 // === STRATEGY EXECUTION ===
-if longCondition and strategy.position_size == 0
+if longCondition
     strategy.entry("Long", strategy.long)
+    lastEntryPrice := close  // Track this entry price for next pyramid calculation
 
 if exitCondition and strategy.position_size > 0
-    strategy.close("Long")
+    strategy.close_all()
+    lastEntryPrice := na  // Reset for next trade sequence
 
 // === VISUALS ===
 // Plot Filter and Bands
@@ -121,7 +139,7 @@ fill(hbandplot, lbandplot, title="Channel Fill", color=channelFillColor)
 
 // === TABLE FOR STRATEGY INFO ===
 if barstate.islast
-    var table infoTable = table.new(position.top_right, 2, 7, bgcolor=color.white, border_width=1)
+    var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.white, border_width=1)
     table.cell(infoTable, 0, 0, "Strategy Info", text_color=color.black, bgcolor=color.gray)
     table.cell(infoTable, 1, 0, "Value", text_color=color.black, bgcolor=color.gray)
     table.cell(infoTable, 0, 1, "Filter", text_color=color.black)
@@ -130,9 +148,13 @@ if barstate.islast
     table.cell(infoTable, 1, 2, str.tostring(math.round(hband, 2)), text_color=color.black)
     table.cell(infoTable, 0, 3, "Lower Band", text_color=color.black)
     table.cell(infoTable, 1, 3, str.tostring(math.round(lband, 2)), text_color=color.black)
-    table.cell(infoTable, 0, 4, "Green Channel", text_color=color.black)
-    table.cell(infoTable, 1, 4, greenChannel ? "✓" : "✗", text_color=greenChannel ? color.green : color.red)
-    table.cell(infoTable, 0, 5, "Position", text_color=color.black)
-    table.cell(infoTable, 1, 5, strategy.position_size > 0 ? "Long" : "Flat", text_color=strategy.position_size > 0 ? color.green : color.gray)
-    table.cell(infoTable, 0, 6, "In Date Range", text_color=color.black)
-    table.cell(infoTable, 1, 6, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
+    table.cell(infoTable, 0, 4, "ATR(14)", text_color=color.black)
+    table.cell(infoTable, 1, 4, str.tostring(math.round(atr, 2)), text_color=color.black)
+    table.cell(infoTable, 0, 5, "Green Channel", text_color=color.black)
+    table.cell(infoTable, 1, 5, greenChannel ? "✓" : "✗", text_color=greenChannel ? color.green : color.red)
+    table.cell(infoTable, 0, 6, "Position Units", text_color=color.black)
+    table.cell(infoTable, 1, 6, str.tostring(math.round(strategy.position_size / (strategy.initial_capital * 0.1), 0)), text_color=strategy.position_size > 0 ? color.green : color.gray)
+    table.cell(infoTable, 0, 7, "Last Entry", text_color=color.black)
+    table.cell(infoTable, 1, 7, na(lastEntryPrice) ? "None" : str.tostring(math.round(lastEntryPrice, 2)), text_color=color.black)
+    table.cell(infoTable, 0, 8, "In Date Range", text_color=color.black)
+    table.cell(infoTable, 1, 8, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
