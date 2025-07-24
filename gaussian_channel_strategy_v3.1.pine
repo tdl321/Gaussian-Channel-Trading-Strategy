@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=true, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
@@ -103,18 +103,21 @@ greenChannel = filt > filt[1]
 inDateRange = time >= startDate and time <= endDate
 
 // === ENTRY AND EXIT CONDITIONS ===
-// Early breakout trigger (touch upper band) - works in any channel color
-earlyBreakout = high > hband and inDateRange
+// Ensure sufficient data for Gaussian Channel calculation and market structure
+sufficientData = bar_index >= (per + 25)
 
-// Original entry condition (close above band) - works in any channel color
-normalEntry = close > hband and inDateRange
+// Green channel entry: Close above upper band (confirmed continuation)
+greenEntry = greenChannel and close > hband and inDateRange and sufficientData
+
+// Red channel entry: Close above upper band (confirmed reversal)
+redEntry = not greenChannel and close > hband and inDateRange and sufficientData
 
 // Base entry condition (first position) - triggers on either condition
-baseEntryCondition = (earlyBreakout or normalEntry) and strategy.position_size == 0
+baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
 
 // Pyramiding condition (additional positions) - CURRENTLY DISABLED
 atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (close - lastEntryPrice) / atr
-canPyramid = false // strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and (earlyBreakout or normalEntry)
+canPyramid = false // strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and (greenEntry or redEntry)
 
 // Combined entry logic
 longCondition = baseEntryCondition or canPyramid
