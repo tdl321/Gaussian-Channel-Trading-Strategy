@@ -16,11 +16,16 @@ mult = input.float(1.414, title="Filtered True Range Multiplier", minval=0)
 modeLag = input.bool(false, title="Reduced Lag Mode")
 modeFast = input.bool(false, title="Fast Response Mode")
 
-// Pyramiding Controls (currently disabled)
-atrSpacing = input.float(0.1, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
+// Pyramiding Controls
+atrSpacing = input.float(0.4, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
+
+// Bull Market Filter
+smaLength = input.int(200, title="Bull Market SMA Length", minval=50, maxval=500)
+enableSmaFilter = input.bool(false, title="Enable SMA Bull Market Filter")
 
 // === ATR AND PYRAMIDING VARIABLES ===
 atr = ta.atr(14)
+sma200 = ta.sma(close, smaLength)
 var float lastEntryPrice = na
 
 
@@ -108,11 +113,14 @@ inDateRange = time >= startDate and time <= endDate
 // Ensure sufficient data for Gaussian Channel calculation and market structure
 sufficientData = bar_index >= (per + 25)
 
+// Bull market filter condition
+bullMarketFilter = enableSmaFilter ? close[1] > sma200[1] : true
+
 // Green channel entry: Close above upper band (confirmed continuation) - NON-REPAINTING
-greenEntry = greenChannel and close[1] > hband[1] and inDateRange and sufficientData and barstate.isconfirmed
+greenEntry = greenChannel and close[1] > hband[1] and bullMarketFilter and inDateRange and sufficientData and barstate.isconfirmed
 
 // Red channel entry: Close above upper band (confirmed reversal) - NON-REPAINTING
-redEntry = not greenChannel and close[1] > hband[1] and inDateRange and sufficientData and barstate.isconfirmed
+redEntry = not greenChannel and close[1] > hband[1] and bullMarketFilter and inDateRange and sufficientData and barstate.isconfirmed
 
 // Base entry condition (first position) - triggers on either condition
 baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
@@ -142,6 +150,9 @@ filtplot = plot(filt, title="Filter", color=fcolor, linewidth=3)
 hbandplot = plot(hband, title="Filtered True Range High Band", color=fcolor)
 lbandplot = plot(lband, title="Filtered True Range Low Band", color=fcolor)
 
+// Plot SMA 200 for bull market reference
+plot(enableSmaFilter ? sma200 : na, title="SMA 200", color=color.new(color.orange, 0), linewidth=2)
+
 // Channel Fill
 channelFillColor = filt > filt[1] ? color.new(#0aff68, 80) : color.new(#ff0a5a, 80)
 fill(hbandplot, lbandplot, title="Channel Fill", color=channelFillColor)
@@ -150,7 +161,7 @@ fill(hbandplot, lbandplot, title="Channel Fill", color=channelFillColor)
 
 // === TABLE FOR STRATEGY INFO ===
 if barstate.islast
-    var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.white, border_width=1)
+    var table infoTable = table.new(position.top_right, 2, 10, bgcolor=color.white, border_width=1)
     table.cell(infoTable, 0, 0, "Strategy Info", text_color=color.black, bgcolor=color.gray)
     table.cell(infoTable, 1, 0, "Value", text_color=color.black, bgcolor=color.gray)
     table.cell(infoTable, 0, 1, "Filter", text_color=color.black)
@@ -167,5 +178,7 @@ if barstate.islast
     table.cell(infoTable, 1, 6, strategy.position_size > 0 ? "Long" : "Flat", text_color=strategy.position_size > 0 ? color.green : color.gray)
     table.cell(infoTable, 0, 7, "Last Entry", text_color=color.black)
     table.cell(infoTable, 1, 7, na(lastEntryPrice) ? "None" : str.tostring(math.round(lastEntryPrice, 2)), text_color=color.black)
-    table.cell(infoTable, 0, 8, "In Date Range", text_color=color.black)
-    table.cell(infoTable, 1, 8, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
+    table.cell(infoTable, 0, 8, "Bull Market (SMA)", text_color=color.black)
+    table.cell(infoTable, 1, 8, bullMarketFilter ? "✓" : "✗", text_color=bullMarketFilter ? color.green : color.red)
+    table.cell(infoTable, 0, 9, "In Date Range", text_color=color.black)
+    table.cell(infoTable, 1, 9, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
