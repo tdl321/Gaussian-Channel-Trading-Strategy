@@ -93,9 +93,9 @@ hband = filt + filttr*mult
 lband = filt - filttr*mult
 
 // === GREEN CHANNEL CONDITION ===
-// Define "green channel" when filter is rising
+// Define "green channel" when filter is rising (NON-REPAINTING)
 fcolor = filt > filt[1] ? color.new(#0aff68, 0) : filt < filt[1] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
-greenChannel = filt > filt[1]
+greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data
 
 
 
@@ -106,32 +106,32 @@ inDateRange = time >= startDate and time <= endDate
 // Ensure sufficient data for Gaussian Channel calculation and market structure
 sufficientData = bar_index >= (per + 25)
 
-// Green channel entry: Close above upper band (confirmed continuation)
-greenEntry = greenChannel and close > hband and inDateRange and sufficientData
+// Green channel entry: Close above upper band (confirmed continuation) - NON-REPAINTING
+greenEntry = greenChannel and close[1] > hband[1] and inDateRange and sufficientData and barstate.isconfirmed
 
-// Red channel entry: Close above upper band (confirmed reversal)
-redEntry = not greenChannel and close > hband and inDateRange and sufficientData
+// Red channel entry: Close above upper band (confirmed reversal) - NON-REPAINTING
+redEntry = not greenChannel and close[1] > hband[1] and inDateRange and sufficientData and barstate.isconfirmed
 
 // Base entry condition (first position) - triggers on either condition
 baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
 
-// Pyramiding condition (additional positions) - ENABLED
-atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (close - lastEntryPrice) / atr
+// Pyramiding condition (additional positions) - ENABLED (NON-REPAINTING)
+atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (close[1] - lastEntryPrice) / atr
 canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and (greenEntry or redEntry)
 
 // Combined entry logic
 longCondition = baseEntryCondition or canPyramid
 
-// Exit condition (closes all positions)
-exitCondition = close < hband
+// Exit condition (closes all positions) - NON-REPAINTING
+exitCondition = close[1] < hband[1] and barstate.isconfirmed
 
 // === STRATEGY EXECUTION ===
 if longCondition
-    strategy.entry("Long", strategy.long)
-    lastEntryPrice := close  // Track entry price for potential future pyramiding
+    strategy.entry("Long", strategy.long, alert_message="entry")
+    lastEntryPrice := close[1]  // Track entry price for potential future pyramiding (confirmed bar)
 
 if exitCondition and strategy.position_size > 0
-    strategy.close_all()
+    strategy.close_all(alert_message="exit")
     lastEntryPrice := na  // Reset for next trade sequence
 
 // === VISUALS ===
