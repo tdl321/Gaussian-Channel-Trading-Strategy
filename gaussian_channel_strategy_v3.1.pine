@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=65, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=true, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=65, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
@@ -76,9 +76,11 @@ alpha = - beta + math.sqrt(math.pow(beta, 2) + 2*beta)
 // Lag
 lag = (per - 1)/(2*N)
 
-// Data
-srcdata = modeLag ? src + (src - src[lag]) : src
-trdata  = modeLag ? ta.tr(true) + (ta.tr(true) - ta.tr(true)[lag]) : ta.tr(true)
+// Data (NON-REPAINTING - use confirmed bars)
+src_confirmed = hlc3[1]  // Use previous bar's hlc3
+tr_confirmed = ta.tr(true)[1]  // Use previous bar's true range
+srcdata = modeLag ? src_confirmed + (src_confirmed - src_confirmed[lag]) : src_confirmed
+trdata  = modeLag ? tr_confirmed + (tr_confirmed - tr_confirmed[lag]) : tr_confirmed
 
 // Filtered Values
 [filtn, filt1]     = f_pole(alpha, srcdata, N)
@@ -94,7 +96,7 @@ lband = filt - filttr*mult
 
 // === GREEN CHANNEL CONDITION ===
 // Define "green channel" when filter is rising (NON-REPAINTING)
-fcolor = filt > filt[1] ? color.new(#0aff68, 0) : filt < filt[1] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
+fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
 greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data
 
 
