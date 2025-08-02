@@ -123,11 +123,11 @@ sufficientData = bar_index >= (per + 25)
 // Bull market filter condition
 bullMarketFilter = enableSmaFilter ? close[1] > sma200[1] : true
 
-// Green channel entry: Open above real-time upper band (immediate continuation)
-greenEntry = greenChannel_realtime and open > hband_realtime and bullMarketFilter and inDateRange and sufficientData
+// Green channel entry: Previous bar touched band + current bar opens above band (immediate continuation)
+greenEntry = greenChannel_realtime and high[1] >= hband_realtime and open > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
-// Red channel entry: Open above real-time upper band (immediate reversal)
-redEntry = not greenChannel_realtime and open > hband_realtime and bullMarketFilter and inDateRange and sufficientData
+// Red channel entry: Previous bar touched band + current bar opens above band (immediate reversal)
+redEntry = not greenChannel_realtime and high[1] >= hband_realtime and open > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
 // Base entry condition (first position) - triggers on either condition
 baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
