@@ -133,15 +133,7 @@ canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpaci
 longCondition = baseEntryCondition or canPyramid
 
 // Exit condition (closes all positions) - NON-REPAINTING
-// Band stop loss controls
-enableBandStop = input.bool(true, title="Enable Band Stop Loss")
-bandBuffer = input.float(1.0, title="Band Stop Buffer (1.0 = at band, <1.0 = below band)", minval=0.0, maxval=1.05, step=0.01)
-// Immediate stop if current bar's low breaks below band with buffer (takes precedence)
-stopLossHit = enableBandStop and low <= hband * bandBuffer
-// Traditional signal exit (confirmed bar close below band)
-signalExit = close[1] < hband[1] and barstate.isconfirmed
-// Combined exit condition - stop loss takes precedence
-exitCondition = stopLossHit or signalExit
+exitCondition = close[1] < hband[1] and barstate.isconfirmed
 
 // === STRATEGY EXECUTION ===
 if longCondition
