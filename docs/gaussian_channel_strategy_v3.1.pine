@@ -99,17 +99,17 @@ filttr = modeFast ? (filtntr + filt1tr)/2 : filtntr
 hband = filt + filttr*mult
 lband = filt - filttr*mult
 
+// === GREEN CHANNEL CONDITION ===
+// Define "green channel" when filter is rising (NON-REPAINTING for plotting)
+fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
+greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
+
 // === REAL-TIME CHANNEL FOR ENTRIES ===
 // Use previous bar's confirmed channel for immediate entry decisions
 // This eliminates the 1-bar delay by using the channel that was already calculated
 hband_realtime = hband[1]  // Use previous bar's confirmed upper band
 lband_realtime = lband[1]  // Use previous bar's confirmed lower band
 greenChannel_realtime = greenChannel  // Use previous bar's confirmed green channel state
-
-// === GREEN CHANNEL CONDITION ===
-// Define "green channel" when filter is rising (NON-REPAINTING for plotting)
-fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
-greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
 
 
 
