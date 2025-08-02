@@ -19,8 +19,13 @@ modeFast = input.bool(false, title="Fast Response Mode")
 // Pyramiding Controls
 atrSpacing = input.float(0.4, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
 
+// Bull Market Filter
+smaLength = input.int(200, title="Bull Market SMA Length", minval=50, maxval=500)
+enableSmaFilter = input.bool(false, title="Enable SMA Bull Market Filter")
+
 // === ATR AND PYRAMIDING VARIABLES ===
 atr = ta.atr(14)  // Standard 14-day ATR
+sma200 = ta.sma(close, smaLength)
 var float lastEntryPrice = na
 
 
@@ -129,30 +134,35 @@ inDateRange = time >= startDate and time <= endDate
 // Ensure sufficient data for Gaussian Channel calculation and market structure
 sufficientData = bar_index >= (per + 25)
 
+// Bull market filter condition
+bullMarketFilter = enableSmaFilter ? close[1] > sma200[1] : true
+
 // Green channel entry: Current bar close above current band (true 0-bar delay continuation)
-greenEntry = greenChannel_realtime and close > hband_realtime and inDateRange and sufficientData
+greenEntry = greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
-// Base entry conditions - only long positions allowed
-baseLongCondition = greenEntry and strategy.position_size == 0
+// Red channel entry: Current bar close above current band (true 0-bar delay reversal)
+redEntry = not greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
-// Pyramiding conditions - only add to existing long positions
+// Base entry condition (first position) - triggers on either condition
+baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
+
+// Pyramiding condition (additional positions) - ENABLED
 atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (open - lastEntryPrice) / atr
-canPyramidLong = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and greenEntry
+canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and (greenEntry or redEntry)
 
-// Combined entry logic - long only
-longCondition = baseLongCondition or canPyramidLong
+// Combined entry logic
+longCondition = baseEntryCondition or canPyramid
 
-// Exit conditions for long positions
-longExitCondition = close < hband_realtime  // Exit long when price closes below upper band
+// Exit condition (closes all positions) - FAST EXIT using current bar data
+exitCondition = close < hband_realtime
 
 // === STRATEGY EXECUTION ===
 if longCondition
-    strategy.entry("Long", strategy.long, alert_message="long_entry")
-    lastEntryPrice := open  // Track entry price for potential future pyramiding
+    strategy.entry("Long", strategy.long, alert_message="entry")
+    lastEntryPrice := open  // Track entry price for potential future pyramiding (current bar open)
 
-// Exit long positions
-if longExitCondition and strategy.position_size > 0
-    strategy.close("Long", alert_message="long_exit")
+if exitCondition and strategy.position_size > 0
+    strategy.close_all(alert_message="exit")
     lastEntryPrice := na  // Reset for next trade sequence
 
 // === VISUALS ===
@@ -160,6 +170,9 @@ if longExitCondition and strategy.position_size > 0
 filtplot = plot(filt, title="Filter", color=fcolor, linewidth=3)
 hbandplot = plot(hband, title="Filtered True Range High Band", color=fcolor)
 lbandplot = plot(lband, title="Filtered True Range Low Band", color=fcolor)
+
+// Plot SMA 200 for bull market reference
+plot(enableSmaFilter ? sma200 : na, title="SMA 200", color=color.new(color.orange, 0), linewidth=2)
 
 // Channel Fill
 channelFillColor = filt > filt[1] ? color.new(#0aff68, 80) : color.new(#ff0a5a, 80)
@@ -169,7 +182,7 @@ fill(hbandplot, lbandplot, title="Channel Fill", color=channelFillColor)
 
 // === TABLE FOR STRATEGY INFO ===
 if barstate.islast
-    var table infoTable = table.new(position.top_right, 2, 9, bgcolor=color.white, border_width=1)
+    var table infoTable = table.new(position.top_right, 2, 10, bgcolor=color.white, border_width=1)
     table.cell(infoTable, 0, 0, "Strategy Info", text_color=color.black, bgcolor=color.gray)
     table.cell(infoTable, 1, 0, "Value", text_color=color.black, bgcolor=color.gray)
     table.cell(infoTable, 0, 1, "Filter", text_color=color.black)
@@ -186,5 +199,7 @@ if barstate.islast
     table.cell(infoTable, 1, 6, strategy.position_size > 0 ? "Long" : "Flat", text_color=strategy.position_size > 0 ? color.green : color.gray)
     table.cell(infoTable, 0, 7, "Last Entry", text_color=color.black)
     table.cell(infoTable, 1, 7, na(lastEntryPrice) ? "None" : str.tostring(math.round(lastEntryPrice, 2)), text_color=color.black)
-    table.cell(infoTable, 0, 8, "In Date Range", text_color=color.black)
-    table.cell(infoTable, 1, 8, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
+    table.cell(infoTable, 0, 8, "Bull Market (SMA)", text_color=color.black)
+    table.cell(infoTable, 1, 8, bullMarketFilter ? "✓" : "✗", text_color=bullMarketFilter ? color.green : color.red)
+    table.cell(infoTable, 0, 9, "In Date Range", text_color=color.black)
+    table.cell(infoTable, 1, 9, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
