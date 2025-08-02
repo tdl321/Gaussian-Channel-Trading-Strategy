@@ -19,8 +19,8 @@ modeFast = input.bool(false, title="Fast Response Mode")
 // Pyramiding Controls
 atrSpacing = input.float(0.4, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
 
-// Short Risk-to-Reward Control
-shortRRRatio = input.float(2.0, title="Short Risk-to-Reward Ratio", minval=1.0, maxval=5.0, step=0.1)
+// Short Take Profit Control
+shortTakeProfitPercent = input.float(10.0, title="Short Take Profit (%)", minval=1.0, maxval=50.0, step=0.5)
 
 // === ATR AND PYRAMIDING VARIABLES ===
 atr = ta.atr(14)  // Standard 14-day ATR
@@ -154,17 +154,17 @@ shortCondition = baseShortCondition or canPyramidShort
 // Exit conditions for both long and short positions
 longExitCondition = close < hband_realtime  // Exit long when price closes below upper band
 
-// Short exit logic - take profit based on percentage profit
+// Short exit logic - take profit based on price drop
 var float shortEntryPrice = na
-var float shortProfitTarget = na
+var float shortTakeProfitPrice = na
 
-// Calculate short profit target when entering short position
+// Calculate short take profit price when entering short position
 if shortCondition
     shortEntryPrice := close
-    shortProfitTarget := shortRRRatio  // Exit when position is up shortRRRatio times (e.g., 3x)
+    shortTakeProfitPrice := close * (1 - shortTakeProfitPercent / 100)  // Price drops by shortTakeProfitPercent%
 
-// Exit short when profit target is hit (position up shortRRRatio times)
-shortExitCondition = (shortEntryPrice - close) / shortEntryPrice >= shortProfitTarget and not na(shortEntryPrice)
+// Exit short when price reaches take profit level
+shortExitCondition = close <= shortTakeProfitPrice and not na(shortTakeProfitPrice)
 
 // === STRATEGY EXECUTION ===
 if longCondition
@@ -185,14 +185,14 @@ if shortExitCondition and strategy.position_size < 0
     strategy.close("Short", alert_message="short_exit")
     lastEntryPrice := na  // Reset for next trade sequence
     shortEntryPrice := na  // Reset short variables
-    shortProfitTarget := na
+    shortTakeProfitPrice := na
 
 // Stop loss for short positions at lower band
 if strategy.position_size < 0 and close >= lband_realtime
     strategy.close("Short", alert_message="short_stop_loss")
     lastEntryPrice := na  // Reset for next trade sequence
     shortEntryPrice := na  // Reset short variables
-    shortProfitTarget := na
+    shortTakeProfitPrice := na
 
 // === VISUALS ===
 // Plot Filter and Bands
