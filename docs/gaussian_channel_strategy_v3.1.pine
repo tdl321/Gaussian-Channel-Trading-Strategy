@@ -166,7 +166,20 @@ shortCondition = baseShortCondition or canPyramidShort
 
 // Exit conditions for both long and short positions
 longExitCondition = close < hband_realtime  // Exit long when price closes below upper band
-shortExitCondition = close > lband_realtime  // Exit short when price closes above lower band
+
+// Short exit logic - take profit based on risk-to-reward ratio
+var float shortEntryPrice = na
+var float shortRiskAmount = na
+var float shortTakeProfit = na
+
+// Calculate short take profit when entering short position
+if shortCondition
+    shortEntryPrice := close
+    shortRiskAmount := shortEntryPrice - lband_realtime  // Risk: entry to lower band
+    shortTakeProfit := shortEntryPrice - (shortRiskAmount * shortRRRatio)  // R:R take profit
+
+// Exit short when take profit is hit
+shortExitCondition = close <= shortTakeProfit and not na(shortTakeProfit)
 
 // === STRATEGY EXECUTION ===
 if longCondition
@@ -186,6 +199,9 @@ if longExitCondition and strategy.position_size > 0
 if shortExitCondition and strategy.position_size < 0
     strategy.close_all(alert_message="short_exit")
     lastEntryPrice := na  // Reset for next trade sequence
+    shortEntryPrice := na  // Reset short variables
+    shortRiskAmount := na
+    shortTakeProfit := na
 
 // === VISUALS ===
 // Plot Filter and Bands
