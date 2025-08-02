@@ -100,31 +100,16 @@ hband = filt + filttr*mult
 lband = filt - filttr*mult
 
 // === REAL-TIME CHANNEL FOR ENTRIES ===
-// Calculate real-time channel using current bar data for immediate entries
-src_realtime = hlc3  // Current bar's hlc3
-tr_realtime = ta.tr(true)  // Current bar's true range
-srcdata_realtime = modeLag ? src_realtime + (src_realtime - src_realtime[lag]) : src_realtime
-trdata_realtime  = modeLag ? tr_realtime + (tr_realtime - tr_realtime[lag]) : tr_realtime
-
-// Real-time filtered values
-[filtn_realtime, filt1_realtime]     = f_pole(alpha, srcdata_realtime, N)
-[filtntr_realtime, filt1tr_realtime] = f_pole(alpha, trdata_realtime,  N)
-
-// Real-time lag reduction
-filt_realtime   = modeFast ? (filtn_realtime + filt1_realtime)/2 : filtn_realtime
-filttr_realtime = modeFast ? (filtntr_realtime + filt1tr_realtime)/2 : filtntr_realtime
-
-// Real-time bands for entry decisions
-hband_realtime = filt_realtime + filttr_realtime*mult
-lband_realtime = filt_realtime - filttr_realtime*mult
+// Use previous bar's confirmed channel for immediate entry decisions
+// This eliminates the 1-bar delay by using the channel that was already calculated
+hband_realtime = hband[1]  // Use previous bar's confirmed upper band
+lband_realtime = lband[1]  // Use previous bar's confirmed lower band
+greenChannel_realtime = greenChannel  // Use previous bar's confirmed green channel state
 
 // === GREEN CHANNEL CONDITION ===
 // Define "green channel" when filter is rising (NON-REPAINTING for plotting)
 fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
 greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
-
-// Real-time green channel for entry decisions
-greenChannel_realtime = filt_realtime > filt_realtime[1]
 
 
 
