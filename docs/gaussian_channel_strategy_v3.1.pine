@@ -24,7 +24,7 @@ smaLength = input.int(200, title="Bull Market SMA Length", minval=50, maxval=500
 enableSmaFilter = input.bool(false, title="Enable SMA Bull Market Filter")
 
 // === ATR AND PYRAMIDING VARIABLES ===
-atr = ta.atr(30)  // More lag in band width changes
+atr = ta.atr(14)  // Standard 14-day ATR
 sma200 = ta.sma(close, smaLength)
 var float lastEntryPrice = na
 
