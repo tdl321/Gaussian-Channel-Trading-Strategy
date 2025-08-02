@@ -19,6 +19,14 @@ modeFast = input.bool(false, title="Fast Response Mode")
 // Pyramiding Controls
 atrSpacing = input.float(0.4, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
 
+// Position Sizing Controls
+longPositionSize = input.float(65, title="Long Position Size (% of equity)", minval=10, maxval=100, step=5)
+shortPositionSize = input.float(30, title="Short Position Size (% of equity)", minval=10, maxval=100, step=5)
+
+// Risk-to-Reward Controls
+longRRRatio = input.float(2.0, title="Long Risk-to-Reward Ratio", minval=1.0, maxval=5.0, step=0.1)
+shortRRRatio = input.float(2.0, title="Short Risk-to-Reward Ratio", minval=1.0, maxval=5.0, step=0.1)
+
 // Bull Market Filter
 smaLength = input.int(200, title="Bull Market SMA Length", minval=50, maxval=500)
 enableSmaFilter = input.bool(false, title="Enable SMA Bull Market Filter")
@@ -140,29 +148,43 @@ bullMarketFilter = enableSmaFilter ? close[1] > sma200[1] : true
 // Green channel entry: Current bar close above current band (true 0-bar delay continuation)
 greenEntry = greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
-// Red channel entry: Current bar close above current band (true 0-bar delay reversal)
-redEntry = not greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
+// Short entry: Current bar close below lower band (market neutral)
+shortEntry = close < lband_realtime and bullMarketFilter and inDateRange and sufficientData
 
-// Base entry condition (first position) - triggers on either condition
-baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
+// Base entry conditions - only one position type allowed
+baseLongCondition = greenEntry and strategy.position_size == 0
+baseShortCondition = shortEntry and strategy.position_size == 0
 
-// Pyramiding condition (additional positions) - ENABLED
+// Pyramiding conditions - only add to existing position type
 atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (open - lastEntryPrice) / atr
-canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and (greenEntry or redEntry)
+canPyramidLong = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and greenEntry
+canPyramidShort = strategy.position_size < 0 and atrDistanceFromLastEntry >= atrSpacing and shortEntry
 
-// Combined entry logic
-longCondition = baseEntryCondition or canPyramid
+// Combined entry logic - prevents simultaneous long/short
+longCondition = baseLongCondition or canPyramidLong
+shortCondition = baseShortCondition or canPyramidShort
 
-// Exit condition (closes all positions) - FAST EXIT using current bar data
-exitCondition = close < hband_realtime
+// Exit conditions for both long and short positions
+longExitCondition = close < hband_realtime  // Exit long when price closes below upper band
+shortExitCondition = close > lband_realtime  // Exit short when price closes above lower band
 
 // === STRATEGY EXECUTION ===
 if longCondition
-    strategy.entry("Long", strategy.long, alert_message="entry")
-    lastEntryPrice := open  // Track entry price for potential future pyramiding (current bar open)
+    strategy.entry("Long", strategy.long, qty_percent=longPositionSize, alert_message="long_entry")
+    lastEntryPrice := open  // Track entry price for potential future pyramiding
 
-if exitCondition and strategy.position_size > 0
-    strategy.close_all(alert_message="exit")
+if shortCondition
+    strategy.entry("Short", strategy.short, qty_percent=shortPositionSize, alert_message="short_entry")
+    lastEntryPrice := open  // Track entry price for potential future pyramiding
+
+// Exit long positions
+if longExitCondition and strategy.position_size > 0
+    strategy.close_all(alert_message="long_exit")
+    lastEntryPrice := na  // Reset for next trade sequence
+
+// Exit short positions
+if shortExitCondition and strategy.position_size < 0
+    strategy.close_all(alert_message="short_exit")
     lastEntryPrice := na  // Reset for next trade sequence
 
 // === VISUALS ===
