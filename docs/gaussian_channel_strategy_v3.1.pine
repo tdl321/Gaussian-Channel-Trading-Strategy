@@ -81,13 +81,13 @@ alpha = - beta + math.sqrt(math.pow(beta, 2) + 2*beta)
 // Lag
 lag = (per - 1)/(2*N)
 
-// Data (NON-REPAINTING - use confirmed bars)
+// Data (NON-REPAINTING - use confirmed bars for plotting and exits)
 src_confirmed = hlc3[1]  // Use previous bar's hlc3
 tr_confirmed = ta.tr(true)[1]  // Use previous bar's true range
 srcdata = modeLag ? src_confirmed + (src_confirmed - src_confirmed[lag]) : src_confirmed
 trdata  = modeLag ? tr_confirmed + (tr_confirmed - tr_confirmed[lag]) : tr_confirmed
 
-// Filtered Values
+// Filtered Values (confirmed for plotting)
 [filtn, filt1]     = f_pole(alpha, srcdata, N)
 [filtntr, filt1tr] = f_pole(alpha, trdata,  N)
 
@@ -95,14 +95,36 @@ trdata  = modeLag ? tr_confirmed + (tr_confirmed - tr_confirmed[lag]) : tr_confi
 filt   = modeFast ? (filtn + filt1)/2 : filtn
 filttr = modeFast ? (filtntr + filt1tr)/2 : filtntr
 
-// Bands
+// Bands (confirmed for plotting and exits)
 hband = filt + filttr*mult
 lband = filt - filttr*mult
 
+// === REAL-TIME CHANNEL FOR ENTRIES ===
+// Calculate real-time channel using current bar data for immediate entries
+src_realtime = hlc3  // Current bar's hlc3
+tr_realtime = ta.tr(true)  // Current bar's true range
+srcdata_realtime = modeLag ? src_realtime + (src_realtime - src_realtime[lag]) : src_realtime
+trdata_realtime  = modeLag ? tr_realtime + (tr_realtime - tr_realtime[lag]) : tr_realtime
+
+// Real-time filtered values
+[filtn_realtime, filt1_realtime]     = f_pole(alpha, srcdata_realtime, N)
+[filtntr_realtime, filt1tr_realtime] = f_pole(alpha, trdata_realtime,  N)
+
+// Real-time lag reduction
+filt_realtime   = modeFast ? (filtn_realtime + filt1_realtime)/2 : filtn_realtime
+filttr_realtime = modeFast ? (filtntr_realtime + filt1tr_realtime)/2 : filtntr_realtime
+
+// Real-time bands for entry decisions
+hband_realtime = filt_realtime + filttr_realtime*mult
+lband_realtime = filt_realtime - filttr_realtime*mult
+
 // === GREEN CHANNEL CONDITION ===
-// Define "green channel" when filter is rising (NON-REPAINTING)
+// Define "green channel" when filter is rising (NON-REPAINTING for plotting)
 fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
-greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data
+greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
+
+// Real-time green channel for entry decisions
+greenChannel_realtime = filt_realtime > filt_realtime[1]
 
 
 
@@ -116,16 +138,16 @@ sufficientData = bar_index >= (per + 25)
 // Bull market filter condition
 bullMarketFilter = enableSmaFilter ? close[1] > sma200[1] : true
 
-// Green channel entry: Open above upper band (immediate continuation) - NON-REPAINTING
-greenEntry = greenChannel and open > hband and bullMarketFilter and inDateRange and sufficientData
+// Green channel entry: Open above real-time upper band (immediate continuation)
+greenEntry = greenChannel_realtime and open > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
-// Red channel entry: Open above upper band (immediate reversal) - NON-REPAINTING
-redEntry = not greenChannel and open > hband and bullMarketFilter and inDateRange and sufficientData
+// Red channel entry: Open above real-time upper band (immediate reversal)
+redEntry = not greenChannel_realtime and open > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
 // Base entry condition (first position) - triggers on either condition
 baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
 
-// Pyramiding condition (additional positions) - ENABLED (NON-REPAINTING)
+// Pyramiding condition (additional positions) - ENABLED
 atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (open - lastEntryPrice) / atr
 canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and (greenEntry or redEntry)
 
