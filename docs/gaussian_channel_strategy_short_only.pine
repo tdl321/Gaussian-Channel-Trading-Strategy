@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy - Long Only", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=65, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy - Short Only", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=65, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
@@ -19,10 +19,12 @@ modeFast = input.bool(false, title="Fast Response Mode")
 // Pyramiding Controls
 atrSpacing = input.float(0.4, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
 
+// Short Take Profit Control
+shortTakeProfitPercent = input.float(10.0, title="Short Take Profit (%)", minval=1.0, maxval=50.0, step=0.5)
+
 // === ATR AND PYRAMIDING VARIABLES ===
 atr = ta.atr(14)  // Standard 14-day ATR
 var float lastEntryPrice = na
-
 
 // === GAUSSIAN CHANNEL FUNCTIONS (Pine Script v6) ===
 // Filter function - courtesy of @e2e4mfck, converted to v6
@@ -94,16 +96,16 @@ filttr = modeFast ? (filtntr + filt1tr)/2 : filtntr
 hband = filt + filttr*mult
 lband = filt - filttr*mult
 
-// === GREEN CHANNEL CONDITION ===
-// Define "green channel" when filter is rising (NON-REPAINTING for plotting)
-fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
-greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
+// Channel color
+fcolor = filt > filt[1] ? color.new(#0aff68, 0) : color.new(#ff0a5a, 0)
+greenChannel = filt > filt[1]
 
-// === REAL-TIME CHANNEL FOR ENTRIES ===
+// === REAL-TIME CHANNEL CALCULATIONS (for entries) ===
 // Calculate current bar's channel for true 0-bar delay entries
-// This uses current bar data for immediate decisions
-src_current = hlc3  // Current bar's hlc3
-tr_current = ta.tr(true)  // Current bar's true range
+src_current = hlc3
+tr_current = ta.tr(true)
+
+// Current bar data processing
 srcdata_current = modeLag ? src_current + (src_current - src_current[lag]) : src_current
 trdata_current  = modeLag ? tr_current + (tr_current - tr_current[lag]) : tr_current
 
@@ -115,12 +117,12 @@ trdata_current  = modeLag ? tr_current + (tr_current - tr_current[lag]) : tr_cur
 filt_current   = modeFast ? (filtn_current + filt1_current)/2 : filtn_current
 filttr_current = modeFast ? (filtntr_current + filt1tr_current)/2 : filtntr_current
 
-// Current bar bands for true 0-bar delay entries
+// Current bar bands (for entries)
 hband_realtime = filt_current + filttr_current*mult
 lband_realtime = filt_current - filttr_current*mult
+
+// Current bar channel color
 greenChannel_realtime = filt_current > filt_current[1]
-
-
 
 // === DATE RANGE FILTER ===
 inDateRange = time >= startDate and time <= endDate
@@ -129,31 +131,49 @@ inDateRange = time >= startDate and time <= endDate
 // Ensure sufficient data for Gaussian Channel calculation and market structure
 sufficientData = bar_index >= (per + 25)
 
-// Green channel entry: Current bar close above current band (true 0-bar delay continuation)
-greenEntry = greenChannel_realtime and close > hband_realtime and inDateRange and sufficientData
+// Short entry: Current bar close below lower band (short only)
+shortEntry = close < lband_realtime and inDateRange and sufficientData
 
-// Base entry conditions - only long positions allowed
-baseLongCondition = greenEntry and strategy.position_size == 0
+// Base entry conditions - only short positions allowed
+baseShortCondition = shortEntry and strategy.position_size == 0
 
-// Pyramiding conditions - only add to existing long positions
+// Pyramiding conditions - only add to existing short positions
 atrDistanceFromLastEntry = na(lastEntryPrice) ? 0 : (open - lastEntryPrice) / atr
-canPyramidLong = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpacing and greenEntry
+canPyramidShort = strategy.position_size < 0 and atrDistanceFromLastEntry >= atrSpacing and shortEntry
 
-// Combined entry logic - long only
-longCondition = baseLongCondition or canPyramidLong
+// Combined entry logic - short only
+shortCondition = baseShortCondition or canPyramidShort
 
-// Exit conditions for long positions
-longExitCondition = close < hband_realtime  // Exit long when price closes below upper band
+// Short exit logic - take profit based on price drop
+var float shortEntryPrice = na
+var float shortTakeProfitPrice = na
+
+// Calculate short take profit price when entering short position
+if shortCondition
+    shortEntryPrice := close
+    shortTakeProfitPrice := close * (1 - shortTakeProfitPercent / 100)  // Price drops by shortTakeProfitPercent%
+
+// Exit short when price reaches take profit level
+shortExitCondition = close <= shortTakeProfitPrice and not na(shortTakeProfitPrice)
 
 // === STRATEGY EXECUTION ===
-if longCondition
-    strategy.entry("Long", strategy.long, alert_message="long_entry")
+if shortCondition
+    strategy.entry("Short", strategy.short, alert_message="short_entry")
     lastEntryPrice := open  // Track entry price for potential future pyramiding
 
-// Exit long positions
-if longExitCondition and strategy.position_size > 0
-    strategy.close("Long", alert_message="long_exit")
+// Exit short positions
+if shortExitCondition and strategy.position_size < 0
+    strategy.close("Short", alert_message="short_exit")
     lastEntryPrice := na  // Reset for next trade sequence
+    shortEntryPrice := na  // Reset short variables
+    shortTakeProfitPrice := na
+
+// Stop loss for short positions at lower band
+if strategy.position_size < 0 and close >= lband_realtime
+    strategy.close("Short", alert_message="short_stop_loss")
+    lastEntryPrice := na  // Reset for next trade sequence
+    shortEntryPrice := na  // Reset short variables
+    shortTakeProfitPrice := na
 
 // === VISUALS ===
 // Plot Filter and Bands
@@ -164,8 +184,6 @@ lbandplot = plot(lband, title="Filtered True Range Low Band", color=fcolor)
 // Channel Fill
 channelFillColor = filt > filt[1] ? color.new(#0aff68, 80) : color.new(#ff0a5a, 80)
 fill(hbandplot, lbandplot, title="Channel Fill", color=channelFillColor)
-
-
 
 // === TABLE FOR STRATEGY INFO ===
 if barstate.islast
@@ -183,7 +201,7 @@ if barstate.islast
     table.cell(infoTable, 0, 5, "Green Channel", text_color=color.black)
     table.cell(infoTable, 1, 5, greenChannel ? "✓" : "✗", text_color=greenChannel ? color.green : color.red)
     table.cell(infoTable, 0, 6, "Position", text_color=color.black)
-    table.cell(infoTable, 1, 6, strategy.position_size > 0 ? "Long" : "Flat", text_color=strategy.position_size > 0 ? color.green : color.gray)
+    table.cell(infoTable, 1, 6, strategy.position_size < 0 ? "Short" : "Flat", text_color=strategy.position_size < 0 ? color.red : color.gray)
     table.cell(infoTable, 0, 7, "Last Entry", text_color=color.black)
     table.cell(infoTable, 1, 7, na(lastEntryPrice) ? "None" : str.tostring(math.round(lastEntryPrice, 2)), text_color=color.black)
     table.cell(infoTable, 0, 8, "In Date Range", text_color=color.black)
