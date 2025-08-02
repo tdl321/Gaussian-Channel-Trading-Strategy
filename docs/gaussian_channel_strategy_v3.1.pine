@@ -153,8 +153,8 @@ canPyramid = strategy.position_size > 0 and atrDistanceFromLastEntry >= atrSpaci
 // Combined entry logic
 longCondition = baseEntryCondition or canPyramid
 
-// Exit condition (closes all positions) - NON-REPAINTING
-exitCondition = close[1] < hband[1] and barstate.isconfirmed
+// Exit condition (closes all positions) - FAST EXIT using current bar data
+exitCondition = close < hband_realtime
 
 // === STRATEGY EXECUTION ===
 if longCondition
