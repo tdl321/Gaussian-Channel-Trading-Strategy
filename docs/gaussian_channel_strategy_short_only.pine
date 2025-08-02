@@ -131,8 +131,8 @@ inDateRange = time >= startDate and time <= endDate
 // Ensure sufficient data for Gaussian Channel calculation and market structure
 sufficientData = bar_index >= (per + 25)
 
-// Short entry: Current bar close below lower band AND channel is bearish (red)
-shortEntry = close < lband_realtime and not greenChannel_realtime and inDateRange and sufficientData
+// Short entry: Current bar close below lower band (short only)
+shortEntry = close < lband_realtime and inDateRange and sufficientData
 
 // Base entry conditions - only short positions allowed
 baseShortCondition = shortEntry and strategy.position_size == 0
