@@ -181,11 +181,11 @@ shortExitCondition = (shortEntryPrice - close) / shortEntryPrice >= shortProfitT
 
 // === STRATEGY EXECUTION ===
 if longCondition
-    strategy.entry("Long", strategy.long, qty_percent=longPositionSize, alert_message="long_entry")
+    strategy.entry("Long", strategy.long, qty=longPositionSize, alert_message="long_entry")
     lastEntryPrice := open  // Track entry price for potential future pyramiding
 
 if shortCondition
-    strategy.entry("Short", strategy.short, qty_percent=shortPositionSize, alert_message="short_entry")
+    strategy.entry("Short", strategy.short, qty=shortPositionSize, alert_message="short_entry")
     lastEntryPrice := open  // Track entry price for potential future pyramiding
 
 // Exit long positions
