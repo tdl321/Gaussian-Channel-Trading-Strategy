@@ -105,11 +105,25 @@ fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.n
 greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
 
 // === REAL-TIME CHANNEL FOR ENTRIES ===
-// Use previous bar's confirmed channel for immediate entry decisions
-// This eliminates the 1-bar delay by using the channel that was already calculated
-hband_realtime = hband[1]  // Use previous bar's confirmed upper band
-lband_realtime = lband[1]  // Use previous bar's confirmed lower band
-greenChannel_realtime = greenChannel  // Use previous bar's confirmed green channel state
+// Calculate current bar's channel for true 0-bar delay entries
+// This uses current bar data for immediate decisions
+src_current = hlc3  // Current bar's hlc3
+tr_current = ta.tr(true)  // Current bar's true range
+srcdata_current = modeLag ? src_current + (src_current - src_current[lag]) : src_current
+trdata_current  = modeLag ? tr_current + (tr_current - tr_current[lag]) : tr_current
+
+// Current bar filtered values
+[filtn_current, filt1_current]     = f_pole(alpha, srcdata_current, N)
+[filtntr_current, filt1tr_current] = f_pole(alpha, trdata_current,  N)
+
+// Current bar lag reduction
+filt_current   = modeFast ? (filtn_current + filt1_current)/2 : filtn_current
+filttr_current = modeFast ? (filtntr_current + filt1tr_current)/2 : filtntr_current
+
+// Current bar bands for true 0-bar delay entries
+hband_realtime = filt_current + filttr_current*mult
+lband_realtime = filt_current - filttr_current*mult
+greenChannel_realtime = filt_current > filt_current[1]
 
 
 
@@ -123,11 +137,11 @@ sufficientData = bar_index >= (per + 25)
 // Bull market filter condition
 bullMarketFilter = enableSmaFilter ? close[1] > sma200[1] : true
 
-// Green channel entry: Previous bar close above band (fastest non-repainting continuation)
-greenEntry = greenChannel_realtime and close[1] > hband_realtime and bullMarketFilter and inDateRange and sufficientData
+// Green channel entry: Current bar close above current band (true 0-bar delay continuation)
+greenEntry = greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
-// Red channel entry: Previous bar close above band (fastest non-repainting reversal)
-redEntry = not greenChannel_realtime and close[1] > hband_realtime and bullMarketFilter and inDateRange and sufficientData
+// Red channel entry: Current bar close above current band (true 0-bar delay reversal)
+redEntry = not greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
 
 // Base entry condition (first position) - triggers on either condition
 baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
