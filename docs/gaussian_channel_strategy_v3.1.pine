@@ -200,8 +200,8 @@ if shortExitCondition and strategy.position_size < 0
     shortEntryPrice := na  // Reset short variables
     shortProfitTarget := na
 
-// Stop loss for short positions at lower band
-if strategy.position_size < 0 and close >= lband_realtime
+// Stop loss for short positions at upper band
+if strategy.position_size < 0 and close >= hband_realtime
     strategy.close("Short", alert_message="short_stop_loss")
     lastEntryPrice := na  // Reset for next trade sequence
     shortEntryPrice := na  // Reset short variables
