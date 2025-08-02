@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.cash, default_qty_value=10000, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=65, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
@@ -180,16 +180,12 @@ if shortCondition
 shortExitCondition = (shortEntryPrice - close) / shortEntryPrice >= shortProfitTarget and not na(shortEntryPrice)
 
 // === STRATEGY EXECUTION ===
-// Calculate position sizes in cash
-longCashAmount = (strategy.equity * longPositionSize) / 100
-shortCashAmount = (strategy.equity * shortPositionSize) / 100
-
 if longCondition
-    strategy.entry("Long", strategy.long, qty=longCashAmount, alert_message="long_entry")
+    strategy.entry("Long", strategy.long, alert_message="long_entry")
     lastEntryPrice := open  // Track entry price for potential future pyramiding
 
 if shortCondition
-    strategy.entry("Short", strategy.short, qty=shortCashAmount, alert_message="short_entry")
+    strategy.entry("Short", strategy.short, alert_message="short_entry")
     lastEntryPrice := open  // Track entry price for potential future pyramiding
 
 // Exit long positions
