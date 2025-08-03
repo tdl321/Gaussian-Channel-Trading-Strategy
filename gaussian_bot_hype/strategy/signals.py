@@ -2,8 +2,8 @@
 """
 Signal Generation Module for Gaussian Channel Strategy
 
-This module handles all signal generation logic for the Gaussian Channel strategy,
-supporting both backtesting and live trading scenarios.
+This module handles signal generation logic for the Gaussian Channel strategy,
+focusing on indicator calculation and signal generation for both backtesting and live trading.
 """
 
 import pandas as pd
@@ -20,8 +20,8 @@ class SignalGenerator:
     """
     Signal generator for Gaussian Channel strategy
     
-    Handles signal generation for both backtesting and live trading,
-    including entry/exit conditions, pyramiding, and risk management.
+    Handles indicator calculation and signal generation for both backtesting and live trading.
+    Focuses on pure signal logic - execution is handled by backtrader or live trading system.
     """
     
     def __init__(self, gaussian_filter, config):
@@ -51,6 +51,10 @@ class SignalGenerator:
         self.entry_count = 0
         self.last_entry_price = None
         self.last_signal_check = None
+        # Add position state tracking
+        self.current_position_size = 0.0  # 0 = no position, >0 = long position
+        self.position_entry_price = None
+        self.position_entry_date = None
     
     def load_csv_data(self, csv_path: str, date_column: str = 'Date', 
                      start_date: Optional[str] = None, end_date: Optional[str] = None) -> Optional[pd.DataFrame]:
@@ -118,7 +122,6 @@ class SignalGenerator:
         
         # Calculate ATR using RMA (Relative Moving Average)
         data['atr'] = self._calculate_rma(data['true_range'], 14)
-        
         
         # Clean up temporary columns
         data.drop(['tr1', 'tr2', 'tr3'], axis=1, inplace=True)
@@ -223,70 +226,47 @@ class SignalGenerator:
         current_price = current_data['Close'].iloc[i]
         atr_val = current_data['atr'].iloc[i]
         
-        # Entry logic based on current bar's signal
-        can_enter = (current_data['green_entry'].iloc[i] or current_data['red_entry'].iloc[i])
+        # === POSITION STATE TRACKING (matches Pine Script strategy.position_size) ===
+        # Check if we have entry signals
+        green_entry_signal = current_data['green_entry'].iloc[i]
+        red_entry_signal = current_data['red_entry'].iloc[i]
+        exit_signal = current_data['exit_signal'].iloc[i]
         
-        # Base entry (first position) - matches Pine Script logic
+        # === ENTRY LOGIC (matches Pine Script baseEntryCondition) ===
+        # Base entry condition: (greenEntry or redEntry) and strategy.position_size == 0
+        can_enter = (green_entry_signal or red_entry_signal) and self.current_position_size == 0
+        
         if can_enter:
+            # Update position state (matches Pine Script entry logic)
+            self.current_position_size = self.position_size_pct
+            self.position_entry_price = current_price
+            self.position_entry_date = current_date
+            
             signals.append({
                 'action': 'BUY',
                 'size': self.position_size_pct,
-                'reason': 'Base Entry',
+                'reason': f'Base Entry - {"Green" if green_entry_signal else "Red"} Channel',
                 'price': current_price,
                 'timestamp': current_date
             })
         
-        # Exit logic
-        if current_data['exit_signal'].iloc[i]:
+        # === EXIT LOGIC (matches Pine Script exitCondition) ===
+        # Exit condition: close < hband_realtime and strategy.position_size > 0
+        if exit_signal and self.current_position_size > 0:
+            # Reset position state (matches Pine Script close_all logic)
+            self.current_position_size = 0.0
+            self.position_entry_price = None
+            self.position_entry_date = None
+            
             signals.append({
                 'action': 'SELL',
                 'size': 1.0,  # Close entire position
-                'reason': 'Signal Exit',
+                'reason': 'Signal Exit - Close below upper band',
                 'price': current_price,
                 'timestamp': current_date
             })
         
         return signals
-    
-    def generate_backtest_signals(self, data: pd.DataFrame, i: int, backtester) -> None:
-        """
-        Generate trading signals for backtesting (called by backtester)
-        
-        Args:
-            data: DataFrame with OHLC and indicators
-            i: Current bar index
-            backtester: Backtester instance
-        """
-        current_date = data.index[i]
-        current_price = data['Close'].iloc[i]
-        atr_val = data['atr'].iloc[i]
-        
-        # Entry logic based on current bar's signal
-        can_enter = (data['green_entry'].iloc[i] or data['red_entry'].iloc[i])
-        
-        # Base entry (first position)
-        if can_enter and backtester.position_size == 0:
-            backtester.place_order('BUY', self.position_size_pct, "Base Entry")
-            self.entry_count = 1
-            self.last_entry_price = current_price
-        
-        # Pyramiding entry
-        elif can_enter and backtester.position_size > 0 and self.entry_count < self.max_pyramids:
-            if self.last_entry_price is not None and atr_val > 0:
-                # Use previous bar's close for ATR distance calculation (Pine Script uses close[1])
-                prev_close = data['Close'].iloc[i-1] if i > 0 else current_price
-                atr_distance = (prev_close - self.last_entry_price) / atr_val
-                if atr_distance >= self.atr_spacing:
-                    backtester.place_order('BUY', self.position_size_pct, 
-                                         f"Pyramid {self.entry_count}", atr_distance)
-                    self.entry_count += 1
-                    self.last_entry_price = current_price
-        
-        # Exit logic
-        if data['exit_signal'].iloc[i] and backtester.position_size > 0:
-            backtester.place_order('SELL', backtester.position_size, "Signal Exit")
-            self.last_entry_price = None
-            self.entry_count = 0
     
     def get_signal_summary(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -313,4 +293,18 @@ class SignalGenerator:
             'total_entries': green_entries + red_entries,
             'exits': exits,
             'entry_rate': (green_entries + red_entries) / total_bars if total_bars > 0 else 0
+        }
+    
+    def get_position_state(self) -> Dict[str, Any]:
+        """
+        Get current position state for debugging and monitoring
+        
+        Returns:
+            Dictionary with current position information
+        """
+        return {
+            'position_size': self.current_position_size,
+            'entry_price': self.position_entry_price,
+            'entry_date': self.position_entry_date,
+            'is_in_position': self.current_position_size > 0
         } 
