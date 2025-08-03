@@ -39,9 +39,7 @@ class GaussianChannelBot:
         self.gaussian_filter = GaussianChannelFilter(
             poles=self.config.POLES,
             period=self.config.PERIOD,
-            multiplier=self.config.MULTIPLIER,
-            mode_lag=self.config.MODE_LAG,
-            mode_fast=self.config.MODE_FAST
+            multiplier=self.config.MULTIPLIER
         )
         self.signal_generator = SignalGenerator(self.gaussian_filter, self.config)
         self.executor = OrderExecutor(self.api, self.config)
