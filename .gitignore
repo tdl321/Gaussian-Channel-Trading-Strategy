@@ -24,23 +24,72 @@ wheels/
 venv/
 env/
 ENV/
+.venv/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Environment Variables and Secrets
+.env
+.env.local
+.env.production
+.env.staging
+*.key
+*.pem
+secrets.json
+config.json
+
+# API Keys and Credentials
+api_keys.txt
+credentials.txt
+wallet_keys.txt
+private_keys.txt
+
 # Data Files (keep structure but ignore large files)
 *.csv.bak
 *.csv.tmp
+data/*.csv
+data/historical_data.csv
+data/cache/
 
-# Results (optional - you may want to track these)
-# results/*.png
-# results/*.jpg
+# Results and Output
+results/
+output/
+backtest_results/
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.html
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+.temp/
+
+# Cache and Test
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 
 # System Files
 .DS_Store
@@ -51,9 +100,25 @@ ENV/
 ehthumbs.db
 Thumbs.db
 
-# Logs
-*.log
+# Trading Bot Specific
+trades_export_*.csv
+performance_report_*.txt
+equity_curve_*.csv
+*.backup
+*.old
 
-# Temporary files
-*.tmp
-*.temp 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Compressed files
+*.zip
+*.tar.gz
+*.rar
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/ 

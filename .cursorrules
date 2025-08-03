@@ -10,7 +10,7 @@ gaussian_bot/
 ├── config.py                 # Configuration & environment loading
 ├── hyperliquid_api.py        # SDK wrapper for Hyperliquid integration
 ├── data/
-│   └── historical_data.csv   # Cached historical candles
+│   └── btc_1d_data_2018_to_2025.csv   # Daily BTC data 2018-2025 (2774 rows)
 ├── strategy/
 │   ├── gaussian_filter.py    # Gaussian filter logic (✅ COMPLETE)
 │   ├── signals.py            # Entry/exit conditions
@@ -163,13 +163,14 @@ from hyperliquid.utils.error import ClientError, ServerError
 - **Gaussian Filter**: 144-day sampling period + 25 days buffer = 169 days minimum
 - **ATR Calculation**: 14-day ATR needs 14+ days of data
 - **SMA Filter**: 200-day SMA needs 200+ days of data
-- **Recommended**: 365+ days for robust backtesting
+- **Available Data**: 2774 days (2018-2025) - EXCELLENT for backtesting
+- **Recommended**: Use full dataset for comprehensive analysis
 
 #### Data Quality Requirements
-- **Timeframe**: 1-minute candles for live trading, 1-hour for backtesting
-- **Completeness**: No gaps > 1 hour in historical data
-- **Accuracy**: OHLCV data must be validated
-- **Source**: Hyperliquid API `info.candles_snapshot()`
+- **Timeframe**: Daily candles for backtesting, 1-minute for live trading
+- **Completeness**: 2774 days of continuous daily data (2018-2025)
+- **Accuracy**: OHLCV data validated, no missing periods
+- **Source**: Historical data from CSV, live data from Hyperliquid API
 
 #### Data Storage Strategy
 - **Local Cache**: Store historical data in CSV format

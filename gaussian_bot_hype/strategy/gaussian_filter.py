@@ -24,7 +24,6 @@ def calculate_rma(series, period):
 class GaussianChannelFilter:
     """
     Gaussian Channel Filter implementation converted from Pine Script
-    Reproduces the f_filt9x and f_pole functions EXACTLY
     """
     
     def __init__(self, poles=6, period=144, multiplier=1.414):
@@ -36,7 +35,7 @@ class GaussianChannelFilter:
         beta = (1 - np.cos(4 * np.arcsin(1) / period)) / (np.power(1.414, 2/poles) - 1)
         self.alpha = -beta + np.sqrt(np.power(beta, 2) + 2*beta)
         
-        # Initialize filter state arrays for exact Pine Script implementation
+        # Initialize filter state arrays
         self.filter_states_src = {}
         self.filter_states_tr = {}
         for i in range(1, 10):  # Support up to 9 poles
@@ -45,7 +44,6 @@ class GaussianChannelFilter:
     
     def _get_binomial_weights(self, pole_num):
         """Get exact binomial coefficient weights as used in Pine Script"""
-        # These are the exact weights from the Pine Script implementation
         weights = {
             1: [0, 0, 0, 0, 0, 0, 0, 0],
             2: [1, 0, 0, 0, 0, 0, 0, 0],
