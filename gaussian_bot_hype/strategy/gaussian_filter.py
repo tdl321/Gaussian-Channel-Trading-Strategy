@@ -27,15 +27,12 @@ class GaussianChannelFilter:
     Reproduces the f_filt9x and f_pole functions EXACTLY
     """
     
-    def __init__(self, poles=4, period=144, multiplier=1.414, mode_lag=False, mode_fast=False):
+    def __init__(self, poles=6, period=144, multiplier=1.414):
         self.poles = poles
         self.period = period
         self.multiplier = multiplier
-        self.mode_lag = mode_lag
-        self.mode_fast = mode_fast
         
         # Pre-calculate filter coefficients
-        self.lag = (period - 1) / (2 * poles)
         beta = (1 - np.cos(4 * np.arcsin(1) / period)) / (np.power(1.414, 2/poles) - 1)
         self.alpha = -beta + np.sqrt(np.power(beta, 2) + 2*beta)
         
@@ -106,8 +103,6 @@ class GaussianChannelFilter:
         n = len(source_series)
         filt_src = np.full(n, np.nan)
         filt_tr = np.full(n, np.nan)
-        filt1_src = np.full(n, np.nan)
-        filt1_tr = np.full(n, np.nan)
         
         # Process each data point
         for i in range(n):
@@ -115,12 +110,8 @@ class GaussianChannelFilter:
                 # Calculate filter for the specified number of poles
                 filt_src[i] = self._f_filt9x(alpha, source_series.iloc[i], pole_num, self.filter_states_src[pole_num])
                 filt_tr[i] = self._f_filt9x(alpha, tr_series.iloc[i], pole_num, self.filter_states_tr[pole_num])
-                
-                # Also calculate single pole for fast mode
-                filt1_src[i] = self._f_filt9x(alpha, source_series.iloc[i], 1, self.filter_states_src[1])
-                filt1_tr[i] = self._f_filt9x(alpha, tr_series.iloc[i], 1, self.filter_states_tr[1])
         
-        return filt_src, filt_tr, filt1_src, filt1_tr
+        return filt_src, filt_tr
     
     def apply_filter(self, source_data, true_range_data):
         """Apply exact Pine Script Gaussian filter to source and true range data"""
@@ -137,27 +128,11 @@ class GaussianChannelFilter:
         valid_src = source_data[valid_mask]
         valid_tr = true_range_data[valid_mask]
         
-        # Apply lag mode adjustment if enabled (exactly as in Pine Script)
         srcdata = valid_src.copy()
         trdata = valid_tr.copy()
         
-        if self.mode_lag:
-            lag_shift = max(1, int(self.lag))
-            if len(srcdata) > lag_shift:
-                for i in range(lag_shift, len(srcdata)):
-                    srcdata.iloc[i] += (srcdata.iloc[i] - srcdata.iloc[i - lag_shift])
-                    trdata.iloc[i] += (trdata.iloc[i] - trdata.iloc[i - lag_shift])
-        
         # Apply the exact Pine Script filter
-        filtn_src, filtn_tr, filt1_src, filt1_tr = self._f_pole(self.alpha, srcdata, trdata, self.poles)
-        
-        # Apply fast mode if enabled (exactly as in Pine Script)
-        if self.mode_fast:
-            filt_src = (filtn_src + filt1_src) / 2
-            filt_tr = (filtn_tr + filt1_tr) / 2
-        else:
-            filt_src = filtn_src
-            filt_tr = filtn_tr
+        filt_src, filt_tr = self._f_pole(self.alpha, srcdata, trdata, self.poles)
         
         # Calculate bands
         hband = filt_src + filt_tr * self.multiplier

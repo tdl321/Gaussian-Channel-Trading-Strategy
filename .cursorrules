@@ -1,0 +1,261 @@
+# Gaussian Channel Trading Bot - Project Rules & Integration Plan
+
+## Project Overview
+Build a fully-automated, trend-following trading bot using a Gaussian Channel strategy for Hyperliquid exchange. The bot will connect to Hyperliquid using their Python SDK, implement long-only Gaussian Channel strategy with dynamic exit logic, and support both backtesting and live deployment on Render.
+
+## Project Structure
+```
+gaussian_bot/
+├── main.py                   # Entry point & live trading loop
+├── config.py                 # Configuration & environment loading
+├── hyperliquid_api.py        # SDK wrapper for Hyperliquid integration
+├── data/
+│   └── historical_data.csv   # Cached historical candles
+├── strategy/
+│   ├── gaussian_filter.py    # Gaussian filter logic (✅ COMPLETE)
+│   ├── signals.py            # Entry/exit conditions
+│   └── backtest.py           # Event-driven backtest engine (✅ COMPLETE)
+├── execution/
+│   ├── executor.py           # Order placement & risk logic
+│   └── position_manager.py   # Track open trades
+├── logs/
+│   └── trade_log.txt         # Logged trades
+├── utils/
+│   └── performance.py        # Metrics: Sharpe, drawdown, profit factor
+└── tests/                    # Test files
+```
+
+## Core Strategy Parameters
+- **Type**: Long-only trend-following strategy
+- **Core Signal**: When price closes above dynamic Gaussian upper band and filter is trending up
+- **Exit**: When price closes below the upper band (dynamic stop-loss)
+- **Parameters**: Poles (4-6), Sampling period (144 days), Multiplier (1.414), ATR(14) for volatility scaling
+
+## Hyperliquid SDK Integration Details
+
+### SDK Structure (Already Available)
+- **`hyperliquid/api.py`** - Base HTTP client
+- **`hyperliquid/info.py`** - Market data and user information
+- **`hyperliquid/exchange.py`** - Trading execution
+- **`hyperliquid/utils/constants.py`** - API endpoints
+- **`hyperliquid/utils/types.py`** - Type definitions
+- **`hyperliquid/utils/signing.py`** - Authentication
+- **`hyperliquid/utils/error.py`** - Error handling
+- **`hyperliquid/websocket_manager.py`** - Real-time data
+
+### Data Format Specifications
+
+#### Candle Data Format (from `info.candles_snapshot()`)
+```python
+[
+    {
+        "T": 1681924499999,        # End timestamp (integer, milliseconds)
+        "c": "29258.0",           # Close price (string)
+        "h": "29309.0",           # High price (string)
+        "i": "15m",               # Interval (string)
+        "l": "29250.0",           # Low price (string)
+        "n": 189,                 # Number of trades (integer)
+        "o": "29295.0",           # Open price (string)
+        "s": "BTC",               # Symbol (string)
+        "t": 1681923600000,       # Start timestamp (integer, milliseconds)
+        "v": "0.98639"            # Volume (string)
+    }
+]
+```
+
+#### Position Data Format (from `info.user_state()`)
+```python
+{
+    "assetPositions": [
+        {
+            "position": {
+                "coin": "BTC",                    # Symbol
+                "entryPx": "45000.0",            # Entry price (string)
+                "leverage": {
+                    "type": "cross",              # "cross" or "isolated"
+                    "value": 10,                  # Leverage multiplier
+                    "rawUsd": "1000.0"           # Only for isolated
+                },
+                "liquidationPx": "40000.0",      # Liquidation price
+                "marginUsed": "100.0",           # Margin used (string)
+                "positionValue": "4500.0",       # Position value (string)
+                "returnOnEquity": "0.05",        # ROE (string)
+                "szi": "0.1",                    # Position size (string) - POSITIVE = LONG, NEGATIVE = SHORT
+                "unrealizedPnl": "50.0"          # Unrealized PnL (string)
+            }
+        }
+    ],
+    "marginSummary": {
+        "accountValue": "5000.0",                # Total account value
+        "totalMarginUsed": "100.0",              # Total margin used
+        "totalNtlPos": "4500.0",                 # Total notional position
+        "totalRawUsd": "5000.0"                  # Raw USD balance
+    }
+}
+```
+
+### Symbol Format
+- Use base symbols only: `"BTC"`, `"ETH"`, `"SOL"` (NO "-PERP" suffix)
+- Case-sensitive
+- Available symbols: `BTC`, `ETH`, `SOL`, `ATOM`, `MATIC`, `DYDX`, `kPEPE`, etc.
+
+### Error Handling
+```python
+from hyperliquid.utils.error import ClientError, ServerError
+
+# ClientError (4xx): 400, 401, 403, 404, 429 (rate limited)
+# ServerError (5xx): 500, 502, 503, 504
+```
+
+## Integration Requirements
+
+### 1. Data Conversion Layer
+- Convert Hyperliquid candle format to pandas DataFrame
+- Handle string-to-float conversions for all prices
+- Convert millisecond timestamps to datetime
+- Standardize column names: `['Open', 'High', 'Low', 'Close', 'Volume']`
+
+### 2. Trading Interface
+- **Buy Orders**: `exchange.market_open(symbol, True, size)`
+- **Sell Orders**: `exchange.market_close(symbol, size)`
+- **Position Tracking**: `info.user_state(address)`
+- **Account Balance**: `info.user_state(address)['marginSummary']['accountValue']`
+
+### 3. Real-time Data (Polling Strategy)
+- **Current Prices**: `info.all_mids()` - Poll every 60 seconds
+- **Candle Data**: `info.candles_snapshot()` - Poll every 60 seconds for strategy
+- **Position Updates**: `info.user_state()` - Poll every 60 seconds
+- **Order Execution**: Poll every 30 seconds for order status
+- **Rationale**: Low-frequency strategy (5-20 signals/month) doesn't require WebSocket overhead
+
+## Implementation Priority
+
+### Phase 1: Core Infrastructure (Week 1)
+1. **Create `hyperliquid_api.py`** - SDK wrapper with data conversion
+2. **Create `strategy/signals.py`** - Signal generation logic
+3. **Create `execution/executor.py`** - Order execution interface
+4. **Create `execution/position_manager.py`** - Position tracking
+
+### Phase 2: Strategy Engine (Week 2)
+1. **Extract signal logic** from `backtest.py`
+2. **Create live signal generation** for real-time trading
+3. **Implement position sizing** logic
+4. **Add risk management** controls
+
+### Phase 3: Execution Engine (Week 3)
+1. **Connect order execution** to Hyperliquid SDK
+2. **Implement margin call handling**
+3. **Add slippage simulation** for backtesting
+4. **Create position monitoring** system
+
+### Phase 4: Live Trading & Deployment (Week 4)
+1. **Create `utils/performance.py`** - Performance metrics
+2. **Add comprehensive logging** system
+3. **Create Render deployment** configuration
+4. **Add monitoring and alerts**
+
+## Key Technical Requirements
+
+### Historical Data Requirements
+
+#### Minimum Data Requirements
+- **Strategy Warm-up**: 200-300 days minimum
+- **Gaussian Filter**: 144-day sampling period + 25 days buffer = 169 days minimum
+- **ATR Calculation**: 14-day ATR needs 14+ days of data
+- **SMA Filter**: 200-day SMA needs 200+ days of data
+- **Recommended**: 365+ days for robust backtesting
+
+#### Data Quality Requirements
+- **Timeframe**: 1-minute candles for live trading, 1-hour for backtesting
+- **Completeness**: No gaps > 1 hour in historical data
+- **Accuracy**: OHLCV data must be validated
+- **Source**: Hyperliquid API `info.candles_snapshot()`
+
+#### Data Storage Strategy
+- **Local Cache**: Store historical data in CSV format
+- **Update Frequency**: Daily updates for new candles
+- **Backup**: Keep multiple versions of historical data
+- **Validation**: Cross-check with multiple data sources
+
+### Data Processing
+- **Historical Data**: Minimum 200-300 days for warm-up (discussed below)
+- **Real-time Data**: Polling every 60 seconds (no WebSocket overhead)
+- **Data Validation**: Ensure OHLCV data integrity
+- **Error Recovery**: Handle API timeouts and rate limits
+
+### Risk Management
+- **Max Leverage**: 5x (configurable)
+- **Margin Requirements**: 20% initial, 75% maintenance
+- **Position Sizing**: 65% of total equity per trade
+- **Max Drawdown**: 20% stop-loss
+- **Daily Loss Limit**: 5% of equity
+
+### Performance Metrics
+- **Sharpe Ratio**: Risk-adjusted returns
+- **Maximum Drawdown**: Peak-to-trough decline
+- **Win Rate**: Percentage of profitable trades
+- **Profit Factor**: Gross profit / Gross loss
+- **Sortino Ratio**: Downside deviation ratio
+
+## Configuration Management
+- **Environment Variables**: API keys, endpoints, parameters
+- **Strategy Parameters**: Poles, period, multiplier, ATR spacing
+- **Risk Parameters**: Leverage, margin requirements, position sizing
+- **Execution Parameters**: Commission, slippage, trading intervals
+
+## Testing Strategy
+1. **Unit Tests**: Individual components (filters, signals, execution)
+2. **Integration Tests**: SDK connectivity and data flow
+3. **Backtesting**: Historical performance validation
+4. **Paper Trading**: Live execution without real money
+5. **Live Trading**: Small position sizes initially
+
+## Deployment Requirements
+- **Render Server**: Python environment with >=2GB RAM
+- **Persistent Storage**: 10-50MB for historical data
+- **Network**: Low bandwidth (~1kb/sec during live trading)
+- **Monitoring**: Logs, performance metrics, error alerts
+
+## Success Criteria
+- **Strategy Performance**: Positive Sharpe ratio > 1.0
+- **Risk Management**: Max drawdown < 20%
+- **Execution Quality**: Slippage < 0.1% per trade
+- **Uptime**: 99.9% availability during market hours
+- **Profitability**: Consistent positive returns over 6+ months
+
+## Code Quality Standards
+- **Type Hints**: All functions should have proper type annotations
+- **Error Handling**: Comprehensive exception handling with logging
+- **Documentation**: Clear docstrings for all classes and methods
+- **Testing**: Minimum 80% code coverage
+- **Logging**: Structured logging for debugging and monitoring
+
+## Security Considerations
+- **API Keys**: Secure storage in environment variables
+- **Private Keys**: Never hardcode wallet private keys
+- **Network Security**: Use HTTPS/WSS for all API communications
+- **Access Control**: Limit API key permissions to trading only
+- **Audit Trail**: Log all trading decisions and executions
+
+## Maintenance Plan
+- **Daily**: Monitor performance metrics and error logs
+- **Weekly**: Review strategy performance and adjust parameters
+- **Monthly**: Comprehensive backtesting with new data
+- **Quarterly**: Strategy optimization and walk-forward analysis
+- **Annually**: Full system audit and performance review
+
+## Current Status
+- ✅ **Project Structure**: Organized and clean
+- ✅ **Gaussian Filter**: Exact Pine Script implementation
+- ✅ **Backtesting Engine**: Advanced with margin calls and slippage
+- ✅ **Configuration System**: Environment-based with validation
+- 🔄 **Hyperliquid Integration**: In progress
+- ⏳ **Live Trading**: Not started
+- ⏳ **Deployment**: Not started
+
+## Next Immediate Actions
+1. Create `hyperliquid_api.py` with SDK wrapper
+2. Create `strategy/signals.py` for signal generation
+3. Create `execution/executor.py` for order execution
+4. Test data conversion from Hyperliquid format to pandas DataFrame
+5. Implement basic order execution with error handling 
