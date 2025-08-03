@@ -42,8 +42,6 @@ class SignalGenerator:
         self.atr_spacing = config.ATR_SPACING
         self.max_pyramids = config.MAX_PYRAMIDS
         self.position_size_pct = config.POSITION_SIZE_PCT
-        self.start_date = config.START_DATE
-        self.end_date = config.END_DATE
         
         # Strategy state
         self.reset_state()
@@ -121,7 +119,6 @@ class SignalGenerator:
         # Calculate ATR using RMA (Relative Moving Average)
         data['atr'] = self._calculate_rma(data['true_range'], 14)
         
-        # No SMA filter needed - removed from strategy
         
         # Clean up temporary columns
         data.drop(['tr1', 'tr2', 'tr3'], axis=1, inplace=True)
@@ -150,7 +147,7 @@ class SignalGenerator:
     
     def prepare_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Prepare trading signals based on Gaussian Channel (Updated for accurate visualization)
+        Prepare trading signals based on Gaussian Channel
         
         Uses current bar data for both plotting and entries to ensure visual accuracy.
         The plotted bands now represent the actual bands used for entry/exit decisions.
@@ -161,7 +158,7 @@ class SignalGenerator:
         Returns:
             DataFrame with signal columns added
         """
-        # === CURRENT BARS (for plotting AND entries) - ACCURATE VISUALIZATION ===
+        # === CURRENT BARS (for plotting AND entries) ===
         # Use current bar data for both plotting and entries to ensure visual accuracy
         src_current = data['hlc3']  # Current bar's hlc3
         tr_current = data['true_range']  # Current bar's true range
@@ -181,17 +178,13 @@ class SignalGenerator:
         # Green channel entry: Current bar close above current band (true 0-bar delay continuation)
         data['green_entry'] = (
             data['green_channel'] & 
-            (data['Close'] > data['hband']) &
-            (data.index >= pd.to_datetime(self.start_date)) &
-            (data.index <= pd.to_datetime(self.end_date))
+            (data['Close'] > data['hband'])
         )
         
         # Red channel entry: Current bar close above current band (true 0-bar delay reversal)
         data['red_entry'] = (
             ~data['green_channel'] & 
-            (data['Close'] > data['hband']) &
-            (data.index >= pd.to_datetime(self.start_date)) &
-            (data.index <= pd.to_datetime(self.end_date))
+            (data['Close'] > data['hband'])
         )
         
         # === EXIT CONDITION (using current bar data) ===
@@ -230,10 +223,6 @@ class SignalGenerator:
         current_price = current_data['Close'].iloc[i]
         atr_val = current_data['atr'].iloc[i]
         
-        # Check date range
-        if current_date < pd.to_datetime(self.start_date) or current_date > pd.to_datetime(self.end_date):
-            return signals
-        
         # Entry logic based on current bar's signal
         can_enter = (current_data['green_entry'].iloc[i] or current_data['red_entry'].iloc[i])
         
@@ -271,10 +260,6 @@ class SignalGenerator:
         current_date = data.index[i]
         current_price = data['Close'].iloc[i]
         atr_val = data['atr'].iloc[i]
-        
-        # Check date range
-        if current_date < pd.to_datetime(self.start_date) or current_date > pd.to_datetime(self.end_date):
-            return
         
         # Entry logic based on current bar's signal
         can_enter = (data['green_entry'].iloc[i] or data['red_entry'].iloc[i])
