@@ -82,7 +82,7 @@ class HyperliquidAPI:
             logger.error(f"Error fetching current prices: {e}")
             return {}
     
-    def get_historical_data(self, symbol: str, interval: str = "1h", 
+    def get_historical_data(self, symbol: str, interval: str = "1d", 
                           start_time: Optional[int] = None, 
                           end_time: Optional[int] = None) -> Optional[pd.DataFrame]:
         """

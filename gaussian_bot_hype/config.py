@@ -50,7 +50,7 @@ class Config:
         self.SLIPPAGE_PER_TICK = float(os.getenv('SLIPPAGE_PER_TICK', '0.0001'))  # 0.01%
         
         # === TIMING PARAMETERS ===
-        self.TRADING_INTERVAL = int(os.getenv('TRADING_INTERVAL', '60'))  # 60 seconds
+        self.TRADING_INTERVAL = int(os.getenv('TRADING_INTERVAL', '86400'))  # 24 hours (daily)
         self.DATA_RETRY_DELAY = int(os.getenv('DATA_RETRY_DELAY', '5'))  # 5 seconds
         self.ERROR_RETRY_DELAY = int(os.getenv('ERROR_RETRY_DELAY', '30'))  # 30 seconds
         

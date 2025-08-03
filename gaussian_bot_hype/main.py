@@ -22,7 +22,7 @@ from strategy.gaussian_filter import GaussianChannelFilter
 from strategy.signals import SignalGenerator
 from execution.executor import OrderExecutor
 from execution.position_manager import PositionManager
-from utils.performance import PerformanceAnalyzer
+from utils.performance import PerformanceTracker
 
 # Load environment variables
 load_dotenv()
@@ -35,16 +35,20 @@ class GaussianChannelBot:
     def __init__(self, config_path=None):
         """Initialize the trading bot with configuration"""
         self.config = Config(config_path)
-        self.api = HyperliquidAPI(self.config)
+        self.api = HyperliquidAPI(
+            api_key=self.config.HYPERLIQUID_API_KEY,
+            secret_key=self.config.HYPERLIQUID_SECRET_KEY,
+            base_url=self.config.HYPERLIQUID_BASE_URL
+        )
         self.gaussian_filter = GaussianChannelFilter(
             poles=self.config.POLES,
             period=self.config.PERIOD,
             multiplier=self.config.MULTIPLIER
         )
         self.signal_generator = SignalGenerator(self.gaussian_filter, self.config)
-        self.executor = OrderExecutor(self.api, self.config)
         self.position_manager = PositionManager(self.config)
-        self.performance_analyzer = PerformanceAnalyzer()
+        self.executor = OrderExecutor(self.api, self.config, self.position_manager)
+        self.performance_analyzer = PerformanceTracker()
         
         # Bot state
         self.is_running = False

@@ -1,0 +1,27 @@
+# Gaussian Channel Trading Bot Dependencies
+
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+
+# Hyperliquid SDK
+hyperliquid-python-sdk>=0.16.0
+
+# Ethereum dependencies (for Hyperliquid SDK)
+eth-account>=0.10.0,<0.14.0
+eth-utils>=2.1.0,<6.0.0
+msgpack>=1.0.5,<2.0.0
+
+# WebSocket support
+websocket-client>=1.5.1,<2.0.0
+
+# Optional: Backtesting and analysis
+backtrader>=1.9.78
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Optional: Development and testing
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0 
