@@ -8,7 +8,7 @@ endDate = input.time(timestamp("2069-12-31 00:00"), title="End Date")
 
 // Channel Controls
 src = input(hlc3, title="Source")
-N = input.int(4, title="Poles", minval=1, maxval=9)
+N = input.int(6, title="Poles", minval=1, maxval=9)
 per = input.int(144, title="Sampling Period", minval=2)
 mult = input.float(1.414, title="Filtered True Range Multiplier", minval=0)
 
