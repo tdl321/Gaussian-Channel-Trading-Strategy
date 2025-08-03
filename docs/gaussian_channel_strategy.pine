@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy - Long Only", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=0, commission_type=strategy.commission.percent, commission_value=0.01, slippage=3, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=0, commission_type=strategy.commission.percent, commission_value=0.01, slippage=3, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
