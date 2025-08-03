@@ -150,7 +150,10 @@ class SignalGenerator:
     
     def prepare_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Prepare trading signals based on Gaussian Channel (Updated to match current Pine Script)
+        Prepare trading signals based on Gaussian Channel (Updated for accurate visualization)
+        
+        Uses current bar data for both plotting and entries to ensure visual accuracy.
+        The plotted bands now represent the actual bands used for entry/exit decisions.
         
         Args:
             data: DataFrame with OHLC and indicators
@@ -158,58 +161,42 @@ class SignalGenerator:
         Returns:
             DataFrame with signal columns added
         """
-        # === CONFIRMED BARS (for plotting) - EXACT PineScript match ===
-        # Use confirmed bars (shift by 1) for plotting
-        src_confirmed = data['hlc3'].shift(1)
-        tr_confirmed = data['true_range'].shift(1)
-        
-        # Apply Gaussian filter to confirmed bars
-        filt, hband, lband = self.gaussian_filter.apply_filter(src_confirmed, tr_confirmed)
-        
-        # Add confirmed bars to dataframe (for plotting)
-        data['filt'] = filt
-        data['hband'] = hband
-        data['lband'] = lband
-        
-        # Green channel condition (filter rising) - EXACT Pine Script: filt[1] > filt[2]
-        data['green_channel'] = (data['filt'] > data['filt'].shift(1)).fillna(False)
-        
-        # === REAL-TIME BARS (for entries) - EXACT PineScript match ===
-        # Use current bar data for true 0-bar delay entries
+        # === CURRENT BARS (for plotting AND entries) - ACCURATE VISUALIZATION ===
+        # Use current bar data for both plotting and entries to ensure visual accuracy
         src_current = data['hlc3']  # Current bar's hlc3
         tr_current = data['true_range']  # Current bar's true range
         
         # Apply Gaussian filter to current bars
         filt_current, hband_current, lband_current = self.gaussian_filter.apply_filter(src_current, tr_current)
         
-        # Add current bar data to dataframe
-        data['filt_current'] = filt_current
-        data['hband_current'] = hband_current
-        data['lband_current'] = lband_current
+        # Add current bar data to dataframe (for plotting AND entries)
+        data['filt'] = filt_current  # Use current data for plotting
+        data['hband'] = hband_current  # Use current data for plotting
+        data['lband'] = lband_current  # Use current data for plotting
         
-        # Current bar green channel condition
-        data['green_channel_current'] = (data['filt_current'] > data['filt_current'].shift(1)).fillna(False)
+        # Green channel condition (filter rising) - Based on current data
+        data['green_channel'] = (data['filt'] > data['filt'].shift(1)).fillna(False)
         
         # === ENTRY CONDITIONS (using current bar data) ===
         # Green channel entry: Current bar close above current band (true 0-bar delay continuation)
         data['green_entry'] = (
-            data['green_channel_current'] & 
-            (data['Close'] > data['hband_current']) &
+            data['green_channel'] & 
+            (data['Close'] > data['hband']) &
             (data.index >= pd.to_datetime(self.start_date)) &
             (data.index <= pd.to_datetime(self.end_date))
         )
         
         # Red channel entry: Current bar close above current band (true 0-bar delay reversal)
         data['red_entry'] = (
-            ~data['green_channel_current'] & 
-            (data['Close'] > data['hband_current']) &
+            ~data['green_channel'] & 
+            (data['Close'] > data['hband']) &
             (data.index >= pd.to_datetime(self.start_date)) &
             (data.index <= pd.to_datetime(self.end_date))
         )
         
         # === EXIT CONDITION (using current bar data) ===
         # Exit condition (closes all positions) - FAST EXIT using current bar data
-        data['exit_signal'] = (data['Close'] < data['hband_current'])
+        data['exit_signal'] = (data['Close'] < data['hband'])
         
         # === SUFFICIENT DATA CHECK ===
         # Ensure sufficient data for Gaussian Channel calculation
