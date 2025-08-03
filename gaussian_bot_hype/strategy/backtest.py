@@ -75,65 +75,105 @@ class GaussianChannelStrategy(bt.Strategy):
         self.lband_values = []
         self.green_channel_values = []
         
+        # Store confirmed values for non-repainting
+        self.filt_confirmed_values = []
+        self.hband_confirmed_values = []
+        self.lband_confirmed_values = []
+        
     def next(self):
         """
         Main strategy logic - called for each bar
         
-        This method implements the Gaussian Channel strategy:
-        1. Calculate Gaussian filter and bands
-        2. Determine entry/exit conditions
+        This method implements the Gaussian Channel strategy with non-repainting logic:
+        1. Use confirmed (previous bar) data for trend determination
+        2. Use current bar data for entry/exit decisions
         3. Execute trades based on signals
         """
         # Skip if not enough data for Gaussian filter
         if len(self.data) < self.params.period + 25:
             return
         
-        # Calculate Gaussian filter and bands for current bar
-        current_hlc3 = self.hlc3[0]
+        # === CONFIRMED DATA (non-repainting) ===
+        # Use previous bar data for trend determination to avoid repainting
+        if len(self.data) < 2:
+            return  # Need at least 2 bars for confirmed data
         
-        # Calculate True Range manually (since we need abs() function)
-        tr1 = self.tr1[0]  # High - Low
-        tr2 = abs(self.tr2[0])  # abs(High - Previous Close)
-        tr3 = abs(self.tr3[0])  # abs(Low - Previous Close)
-        current_tr = max(tr1, tr2, tr3)
+        # Previous bar data (confirmed)
+        prev_hlc3 = self.hlc3[-1]  # Previous bar's hlc3
         
-        # Apply Gaussian filter
-        filt, hband, lband = self.gaussian_filter.apply_filter(
-            pd.Series([current_hlc3]), 
-            pd.Series([current_tr])
+        # Calculate True Range for previous bar
+        prev_tr1 = self.tr1[-1]  # High - Low
+        prev_tr2 = abs(self.tr2[-1])  # abs(High - Previous Close)
+        prev_tr3 = abs(self.tr3[-1])  # abs(Low - Previous Close)
+        prev_tr = max(prev_tr1, prev_tr2, prev_tr3)
+        
+        # Apply Gaussian filter to confirmed data
+        filt_confirmed, hband_confirmed, lband_confirmed = self.gaussian_filter.apply_filter(
+            pd.Series([prev_hlc3]), 
+            pd.Series([prev_tr])
         )
         
-        # Store values for this bar
-        current_filt = filt.iloc[0] if not filt.empty else np.nan
-        current_hband = hband.iloc[0] if not hband.empty else np.nan
-        current_lband = lband.iloc[0] if not lband.empty else np.nan
+        # Store confirmed values
+        current_filt_confirmed = filt_confirmed.iloc[0] if not filt_confirmed.empty else np.nan
+        current_hband_confirmed = hband_confirmed.iloc[0] if not hband_confirmed.empty else np.nan
+        current_lband_confirmed = lband_confirmed.iloc[0] if not lband_confirmed.empty else np.nan
         
-        self.filt_values.append(current_filt)
-        self.hband_values.append(current_hband)
-        self.lband_values.append(current_lband)
+        self.filt_confirmed_values.append(current_filt_confirmed)
+        self.hband_confirmed_values.append(current_hband_confirmed)
+        self.lband_confirmed_values.append(current_lband_confirmed)
         
-        # Determine green channel (filter rising)
-        if len(self.filt_values) >= 2:
-            green_channel = self.filt_values[-1] > self.filt_values[-2]
+        # Determine green channel (non-repainting) - Based on confirmed data
+        if len(self.filt_confirmed_values) >= 2:
+            green_channel = self.filt_confirmed_values[-1] > self.filt_confirmed_values[-2]
         else:
             green_channel = False
         
         self.green_channel_values.append(green_channel)
         
+        # === CURRENT BAR DATA (for entries only) ===
+        # Use current bar data for entry/exit decisions (0-bar delay)
+        current_hlc3 = self.hlc3[0]  # Current bar's hlc3
+        
+        # Calculate True Range for current bar
+        tr1 = self.tr1[0]  # High - Low
+        tr2 = abs(self.tr2[0])  # abs(High - Previous Close)
+        tr3 = abs(self.tr3[0])  # abs(Low - Previous Close)
+        current_tr = max(tr1, tr2, tr3)
+        
+        # Apply Gaussian filter to current bar
+        filt_current, hband_current, lband_current = self.gaussian_filter.apply_filter(
+            pd.Series([current_hlc3]), 
+            pd.Series([current_tr])
+        )
+        
+        # Store current values
+        current_filt = filt_current.iloc[0] if not filt_current.empty else np.nan
+        current_hband = hband_current.iloc[0] if not hband_current.empty else np.nan
+        current_lband = lband_current.iloc[0] if not lband_current.empty else np.nan
+        
+        self.filt_values.append(current_filt)
+        self.hband_values.append(current_hband)
+        self.lband_values.append(current_lband)
+        
         # Skip if we don't have valid filter values
-        if np.isnan(current_filt) or np.isnan(current_hband):
+        if np.isnan(current_filt_confirmed) or np.isnan(current_hband) or np.isnan(current_filt):
             return
         
-        # Entry conditions
+        # === ENTRY CONDITIONS (current bar close, confirmed trend) ===
         current_close = self.data.close[0]
+        
+        # Green channel entry: Current bar close above current band (confirmed trend)
         green_entry = green_channel and current_close > current_hband
+        
+        # Red channel entry: Current bar close above current band (confirmed trend)
         red_entry = not green_channel and current_close > current_hband
+        
         can_enter = green_entry or red_entry
         
-        # Exit condition
+        # === EXIT CONDITION (using current bar data) ===
         exit_signal = current_close < current_hband
         
-        # Trading logic
+        # === TRADING LOGIC ===
         if not self.position:  # No position
             if can_enter:
                 # Calculate position size

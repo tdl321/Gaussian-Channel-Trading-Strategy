@@ -152,8 +152,8 @@ class SignalGenerator:
         """
         Prepare trading signals based on Gaussian Channel
         
-        Uses current bar data for both plotting and entries to ensure visual accuracy.
-        The plotted bands now represent the actual bands used for entry/exit decisions.
+        Uses confirmed (previous bar) data for trend determination to avoid repainting,
+        and current bar data only for entry/exit decisions. This matches Pine Script behavior.
         
         Args:
             data: DataFrame with OHLC and indicators
@@ -161,38 +161,51 @@ class SignalGenerator:
         Returns:
             DataFrame with signal columns added
         """
-        # === CURRENT BARS (for plotting AND entries) ===
-        # Use current bar data for both plotting and entries to ensure visual accuracy
+        # === CONFIRMED DATA (non-repainting) ===
+        # Use previous bar data for trend determination to avoid repainting
+        src_confirmed = data['hlc3'].shift(1)  # Previous bar's hlc3
+        tr_confirmed = data['true_range'].shift(1)  # Previous bar's true range
+        
+        # Apply Gaussian filter to confirmed bars
+        filt_confirmed, hband_confirmed, lband_confirmed = self.gaussian_filter.apply_filter(src_confirmed, tr_confirmed)
+        
+        # Add confirmed data to dataframe (for plotting and trend determination)
+        data['filt_confirmed'] = filt_confirmed
+        data['hband_confirmed'] = hband_confirmed
+        data['lband_confirmed'] = lband_confirmed
+        
+        # Green channel condition (non-repainting) - Based on confirmed data
+        data['green_channel'] = (filt_confirmed > filt_confirmed.shift(1)).fillna(False)
+        
+        # === CURRENT BAR DATA (for entries only) ===
+        # Use current bar data for entry/exit decisions (0-bar delay)
         src_current = data['hlc3']  # Current bar's hlc3
         tr_current = data['true_range']  # Current bar's true range
         
         # Apply Gaussian filter to current bars
         filt_current, hband_current, lband_current = self.gaussian_filter.apply_filter(src_current, tr_current)
         
-        # Add current bar data to dataframe (for plotting AND entries)
-        data['filt'] = filt_current  # Use current data for plotting
-        data['hband'] = hband_current  # Use current data for plotting
-        data['lband'] = lband_current  # Use current data for plotting
+        # Add current bar data to dataframe (for entries)
+        data['filt_current'] = filt_current
+        data['hband_current'] = hband_current
+        data['lband_current'] = lband_current
         
-        # Green channel condition (filter rising) - Based on current data
-        data['green_channel'] = (data['filt'] > data['filt'].shift(1)).fillna(False)
-        
-        # === ENTRY CONDITIONS (using current bar data) ===
-        # Green channel entry: Current bar close above current band (true 0-bar delay continuation)
+        # === ENTRY CONDITIONS (current bar close, confirmed trend) ===
+        # Green channel entry: Current bar close above current band (confirmed trend)
         data['green_entry'] = (
-            data['green_channel'] & 
-            (data['Close'] > data['hband'])
+            data['green_channel'] &  # Confirmed trend (non-repainting)
+            (data['Close'] > hband_current)  # Current bar close
         )
         
-        # Red channel entry: Current bar close above current band (true 0-bar delay reversal)
+        # Red channel entry: Current bar close above current band (confirmed trend)
         data['red_entry'] = (
-            ~data['green_channel'] & 
-            (data['Close'] > data['hband'])
+            ~data['green_channel'] &  # Confirmed trend (non-repainting)
+            (data['Close'] > hband_current)  # Current bar close
         )
         
         # === EXIT CONDITION (using current bar data) ===
         # Exit condition (closes all positions) - FAST EXIT using current bar data
-        data['exit_signal'] = (data['Close'] < data['hband'])
+        data['exit_signal'] = (data['Close'] < hband_current)
         
         # === SUFFICIENT DATA CHECK ===
         # Ensure sufficient data for Gaussian Channel calculation
