@@ -1,5 +1,5 @@
 //@version=6
-strategy(title="Gaussian Channel Strategy - Long Only", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=65, pyramiding=5, commission_type=strategy.commission.percent, commission_value=0.1, slippage=1, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+strategy(title="Gaussian Channel Strategy - Long Only", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=0, commission_type=strategy.commission.percent, commission_value=0.01, slippage=3, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
 
 // === INPUTS ===
 // Date Range Filter
@@ -12,25 +12,15 @@ N = input.int(6, title="Poles", minval=1, maxval=9)
 per = input.int(144, title="Sampling Period", minval=2)
 mult = input.float(1.414, title="Filtered True Range Multiplier", minval=0)
 
-// Optional Controls
-modeLag = input.bool(false, title="Reduced Lag Mode")
-modeFast = input.bool(false, title="Fast Response Mode")
-
 // Pyramiding Controls
 atrSpacing = input.float(0.4, title="ATR Spacing Between Entries", minval=0.1, maxval=3.0)
 
-// Bull Market Filter
-smaLength = input.int(200, title="Bull Market SMA Length", minval=50, maxval=500)
-enableSmaFilter = input.bool(false, title="Enable SMA Bull Market Filter")
-
-// === ATR AND PYRAMIDING VARIABLES ===
+// === VARIABLES ===
 atr = ta.atr(14)  // Standard 14-day ATR
-sma200 = ta.sma(close, smaLength)
 var float lastEntryPrice = na
 
-
-// === GAUSSIAN CHANNEL FUNCTIONS (Pine Script v6) ===
-// Filter function - courtesy of @e2e4mfck, converted to v6
+// === GAUSSIAN CHANNEL FUNCTIONS ===
+// Filter function
 f_filt9x(_a, _s, _i) => 
     var int _m2 = 0, var int _m3 = 0, var int _m4 = 0, var int _m5 = 0, var int _m6 = 0
     var int _m7 = 0, var int _m8 = 0, var int _m9 = 0, var float _f = 0.0
@@ -78,29 +68,26 @@ f_pole(_a, _s, _i) =>
 beta  = (1 - math.cos(4*math.asin(1)/per)) / (math.pow(1.414, 2/N) - 1)
 alpha = - beta + math.sqrt(math.pow(beta, 2) + 2*beta)
 
-// Lag
-lag = (per - 1)/(2*N)
-
-// Data (NON-REPAINTING - use confirmed bars for plotting and exits)
+// Data
 src_confirmed = hlc3[1]  // Use previous bar's hlc3
 tr_confirmed = ta.tr(true)[1]  // Use previous bar's true range
-srcdata = modeLag ? src_confirmed + (src_confirmed - src_confirmed[lag]) : src_confirmed
-trdata  = modeLag ? tr_confirmed + (tr_confirmed - tr_confirmed[lag]) : tr_confirmed
+srcdata = src_confirmed
+trdata  = tr_confirmed
 
-// Filtered Values (confirmed for plotting)
+// Filtered Values
 [filtn, filt1]     = f_pole(alpha, srcdata, N)
 [filtntr, filt1tr] = f_pole(alpha, trdata,  N)
 
-// Lag Reduction
-filt   = modeFast ? (filtn + filt1)/2 : filtn
-filttr = modeFast ? (filtntr + filt1tr)/2 : filtntr
+// Filter values
+filt   = filtn
+filttr = filtntr
 
-// Bands (confirmed for plotting and exits)
+// Bands
 hband = filt + filttr*mult
 lband = filt - filttr*mult
 
 // === GREEN CHANNEL CONDITION ===
-// Define "green channel" when filter is rising (NON-REPAINTING for plotting)
+// Define "green channel" when filter is rising
 fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
 greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
 
@@ -109,16 +96,16 @@ greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plottin
 // This uses current bar data for immediate decisions
 src_current = hlc3  // Current bar's hlc3
 tr_current = ta.tr(true)  // Current bar's true range
-srcdata_current = modeLag ? src_current + (src_current - src_current[lag]) : src_current
-trdata_current  = modeLag ? tr_current + (tr_current - tr_current[lag]) : tr_current
+srcdata_current = src_current
+trdata_current  = tr_current
 
 // Current bar filtered values
 [filtn_current, filt1_current]     = f_pole(alpha, srcdata_current, N)
 [filtntr_current, filt1tr_current] = f_pole(alpha, trdata_current,  N)
 
-// Current bar lag reduction
-filt_current   = modeFast ? (filtn_current + filt1_current)/2 : filtn_current
-filttr_current = modeFast ? (filtntr_current + filt1tr_current)/2 : filtntr_current
+// Current bar filter values
+filt_current   = filtn_current
+filttr_current = filtntr_current
 
 // Current bar bands for true 0-bar delay entries
 hband_realtime = filt_current + filttr_current*mult
@@ -134,14 +121,13 @@ inDateRange = time >= startDate and time <= endDate
 // Ensure sufficient data for Gaussian Channel calculation and market structure
 sufficientData = bar_index >= (per + 25)
 
-// Bull market filter condition
-bullMarketFilter = enableSmaFilter ? close[1] > sma200[1] : true
+
 
 // Green channel entry: Current bar close above current band (true 0-bar delay continuation)
-greenEntry = greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
+greenEntry = greenChannel_realtime and close > hband_realtime and inDateRange and sufficientData
 
 // Red channel entry: Current bar close above current band (true 0-bar delay reversal)
-redEntry = not greenChannel_realtime and close > hband_realtime and bullMarketFilter and inDateRange and sufficientData
+redEntry = not greenChannel_realtime and close > hband_realtime and inDateRange and sufficientData
 
 // Base entry condition (first position) - triggers on either condition
 baseEntryCondition = (greenEntry or redEntry) and strategy.position_size == 0
@@ -171,14 +157,9 @@ filtplot = plot(filt, title="Filter", color=fcolor, linewidth=3)
 hbandplot = plot(hband, title="Filtered True Range High Band", color=fcolor)
 lbandplot = plot(lband, title="Filtered True Range Low Band", color=fcolor)
 
-// Plot SMA 200 for bull market reference
-plot(enableSmaFilter ? sma200 : na, title="SMA 200", color=color.new(color.orange, 0), linewidth=2)
-
 // Channel Fill
 channelFillColor = filt > filt[1] ? color.new(#0aff68, 80) : color.new(#ff0a5a, 80)
 fill(hbandplot, lbandplot, title="Channel Fill", color=channelFillColor)
-
-
 
 // === TABLE FOR STRATEGY INFO ===
 if barstate.islast
@@ -199,7 +180,5 @@ if barstate.islast
     table.cell(infoTable, 1, 6, strategy.position_size > 0 ? "Long" : "Flat", text_color=strategy.position_size > 0 ? color.green : color.gray)
     table.cell(infoTable, 0, 7, "Last Entry", text_color=color.black)
     table.cell(infoTable, 1, 7, na(lastEntryPrice) ? "None" : str.tostring(math.round(lastEntryPrice, 2)), text_color=color.black)
-    table.cell(infoTable, 0, 8, "Bull Market (SMA)", text_color=color.black)
-    table.cell(infoTable, 1, 8, bullMarketFilter ? "✓" : "✗", text_color=bullMarketFilter ? color.green : color.red)
-    table.cell(infoTable, 0, 9, "In Date Range", text_color=color.black)
-    table.cell(infoTable, 1, 9, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
+    table.cell(infoTable, 0, 8, "In Date Range", text_color=color.black)
+    table.cell(infoTable, 1, 8, inDateRange ? "✓" : "✗", text_color=inDateRange ? color.green : color.red) 
