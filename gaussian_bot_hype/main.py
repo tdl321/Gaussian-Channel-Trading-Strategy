@@ -1,296 +1,274 @@
 #!/usr/bin/env python3
 """
-Gaussian Channel Trend-Following Bot for Hyperliquid on Render
-
-Main entry point for the trading bot with both backtesting and live trading capabilities.
+Simple Gaussian Channel Trading Bot using Hyperliquid SDK directly
 """
 
-import os
-import sys
 import asyncio
-import schedule
+import sys
+import logging
 import time
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from typing import Optional
 
-# Add the project root to the path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import eth_account
+from eth_account import Account
 
-from config import Config
-from hyperliquid_api import HyperliquidAPI
+from config import (
+    HYPERLIQUID_API_KEY, HYPERLIQUID_SECRET_KEY, HYPERLIQUID_BASE_URL,
+    SYMBOL, LEVERAGE, POLES, PERIOD, MULTIPLIER, TRADING_INTERVAL,
+    print_config
+)
 from strategy.gaussian_filter import GaussianChannelFilter
 from strategy.signals import SignalGenerator
-from execution.executor import OrderExecutor
-from execution.position_manager import PositionManager
-from utils.performance import PerformanceTracker
+from hyperliquid.exchange import Exchange
+from hyperliquid.info import Info
 
-# Load environment variables
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 class GaussianChannelBot:
     """
-    Main trading bot class that orchestrates all components
+    Simple Gaussian Channel Trading Bot using Hyperliquid SDK directly
     """
     
-    def __init__(self, config_path=None):
-        """Initialize the trading bot with configuration"""
-        self.config = Config(config_path)
-        self.api = HyperliquidAPI(
-            api_key=self.config.HYPERLIQUID_API_KEY,
-            secret_key=self.config.HYPERLIQUID_SECRET_KEY,
-            base_url=self.config.HYPERLIQUID_BASE_URL
-        )
-        self.gaussian_filter = GaussianChannelFilter(
-            poles=self.config.POLES,
-            period=self.config.PERIOD,
-            multiplier=self.config.MULTIPLIER
-        )
-        self.signal_generator = SignalGenerator(self.gaussian_filter, self.config)
-        self.position_manager = PositionManager(self.config)
-        self.executor = OrderExecutor(self.api, self.config, self.position_manager)
-        self.performance_analyzer = PerformanceTracker()
-        
-        # Bot state
+    def __init__(self):
+        """Initialize the bot"""
         self.is_running = False
-        self.last_signal_check = None
         
-    async def initialize(self):
-        """Initialize all components and establish connections"""
-        print("🚀 Initializing Gaussian Channel Bot...")
+        # Initialize Hyperliquid SDK components
+        self.wallet = None
+        self.exchange = None
+        self.info = None
         
+        # Initialize strategy components
+        self.gaussian_filter = None
+        self.signal_generator = None
+        
+        logger.info("Gaussian Channel Bot initialized")
+    
+    def initialize(self) -> bool:
+        """Initialize the bot components"""
         try:
-            # Initialize API connection
-            await self.api.connect()
-            print("✅ API connection established")
+            # Create wallet from private key
+            self.wallet = Account.from_key(HYPERLIQUID_SECRET_KEY)
+            logger.info(f"Wallet initialized: {self.wallet.address}")
             
-            # Load historical data for warm-up
-            await self.load_historical_data()
-            print("✅ Historical data loaded")
+            # Initialize Hyperliquid SDK
+            self.info = Info(HYPERLIQUID_BASE_URL)
+            self.exchange = Exchange(
+                wallet=self.wallet,
+                base_url=HYPERLIQUID_BASE_URL
+            )
+            logger.info("Hyperliquid SDK initialized")
             
-            # Initialize position manager
-            await self.position_manager.initialize(self.api)
-            print("✅ Position manager initialized")
+            # Initialize strategy components
+            self.gaussian_filter = GaussianChannelFilter(
+                poles=POLES,
+                period=PERIOD,
+                multiplier=MULTIPLIER
+            )
             
-            print("🎯 Bot initialization complete!")
+            self.signal_generator = SignalGenerator(
+                gaussian_filter=self.gaussian_filter,
+                config_params={
+                    'POLES': POLES,
+                    'PERIOD': PERIOD,
+                    'MULTIPLIER': MULTIPLIER
+                }
+            )
+            logger.info("Strategy components initialized")
+            
+            # Set leverage
+            self.exchange.update_leverage(LEVERAGE, SYMBOL)
+            logger.info(f"Leverage set to {LEVERAGE}x for {SYMBOL}")
+            
             return True
             
         except Exception as e:
-            print(f"❌ Bot initialization failed: {e}")
+            logger.error(f"Failed to initialize bot: {e}")
             return False
     
-    async def load_historical_data(self):
-        """Load historical data for strategy warm-up"""
+    def get_current_position(self) -> Optional[dict]:
+        """Get current position for the trading symbol"""
         try:
-            # Load data from CSV if available, otherwise from API
-            csv_path = os.path.join(self.config.DATA_DIR, "historical_data.csv")
-            if os.path.exists(csv_path):
-                data = self.signal_generator.load_csv_data(csv_path)
-            else:
-                # Load from API (last 300 days for warm-up)
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=300)
-                data = await self.api.get_historical_data(
-                    self.config.SYMBOL, 
-                    start_date, 
-                    end_date
-                )
+            user_state = self.info.user_state(self.wallet.address)
             
-            if data is not None and len(data) > 0:
-                self.signal_generator.prepare_signals(data)
-                print(f"📊 Loaded {len(data)} historical bars")
-            else:
-                print("⚠️  No historical data available")
-                
-        except Exception as e:
-            print(f"❌ Error loading historical data: {e}")
-    
-    async def run_live_trading(self):
-        """Main live trading loop"""
-        print("🔄 Starting live trading loop...")
-        self.is_running = True
-        
-        while self.is_running:
-            try:
-                # Get current market data
-                current_data = await self.api.get_current_data(self.config.SYMBOL)
-                if current_data is None:
-                    print("⚠️  No current data available, retrying...")
-                    await asyncio.sleep(self.config.DATA_RETRY_DELAY)
-                    continue
-                
-                # Generate signals
-                signals = self.signal_generator.generate_live_signals(current_data)
-                
-                # Execute trades based on signals
-                if signals:
-                    await self.execute_signals(signals, current_data)
-                
-                # Update position manager
-                await self.position_manager.update_positions(self.api)
-                
-                # Check for margin calls
-                await self.check_margin_calls()
-                
-                # Log performance metrics
-                self.log_performance_metrics()
-                
-                # Wait for next iteration
-                await asyncio.sleep(self.config.TRADING_INTERVAL)
-                
-            except Exception as e:
-                print(f"❌ Error in live trading loop: {e}")
-                await asyncio.sleep(self.config.ERROR_RETRY_DELAY)
-    
-    async def execute_signals(self, signals, current_data):
-        """Execute trading signals"""
-        for signal in signals:
-            try:
-                if signal['action'] == 'BUY':
-                    await self.executor.place_buy_order(
-                        symbol=self.config.SYMBOL,
-                        size=signal['size'],
-                        reason=signal['reason']
-                    )
-                elif signal['action'] == 'SELL':
-                    await self.executor.place_sell_order(
-                        symbol=self.config.SYMBOL,
-                        size=signal['size'],
-                        reason=signal['reason']
-                    )
-                    
-            except Exception as e:
-                print(f"❌ Error executing signal {signal}: {e}")
-    
-    async def check_margin_calls(self):
-        """Check for margin calls and handle them"""
-        try:
-            margin_status = await self.position_manager.check_margin_status(self.api)
+            for position_data in user_state["assetPositions"]:
+                position = position_data["position"]
+                if position["coin"] == SYMBOL:
+                    return {
+                        'size': float(position["szi"]),
+                        'entry_price': float(position["entryPx"]),
+                        'unrealized_pnl': float(position["unrealizedPnl"]),
+                        'position_value': float(position["positionValue"])
+                    }
             
-            if margin_status['is_margin_call']:
-                print(f"⚠️  MARGIN CALL: Level {margin_status['margin_level_pct']:.1f}%")
-                
-                if margin_status['is_forced_liquidation']:
-                    print("🚨 FORCED LIQUIDATION REQUIRED")
-                    await self.executor.force_liquidate_all(self.config.SYMBOL)
-                    
-        except Exception as e:
-            print(f"❌ Error checking margin calls: {e}")
-    
-    def log_performance_metrics(self):
-        """Log current performance metrics"""
-        try:
-            metrics = self.performance_analyzer.calculate_current_metrics(
-                self.position_manager.get_positions(),
-                self.api.get_account_balance()
-            )
-            
-            # Log to file
-            log_entry = {
-                'timestamp': datetime.now().isoformat(),
-                'equity': metrics['total_equity'],
-                'positions': len(metrics['open_positions']),
-                'daily_pnl': metrics['daily_pnl'],
-                'margin_level': metrics['margin_level_pct']
-            }
-            
-            self.performance_analyzer.log_metrics(log_entry)
+            return None  # No position
             
         except Exception as e:
-            print(f"❌ Error logging performance metrics: {e}")
-    
-    async def run_backtest(self, start_date=None, end_date=None):
-        """Run backtest using historical data"""
-        print("📊 Running backtest...")
-        
-        try:
-            # Load historical data
-            if start_date is None:
-                start_date = datetime.now() - timedelta(days=365)
-            if end_date is None:
-                end_date = datetime.now()
-            
-            data = await self.api.get_historical_data(
-                self.config.SYMBOL, 
-                start_date, 
-                end_date
-            )
-            
-            if data is None or len(data) == 0:
-                print("❌ No historical data available for backtest")
-                return None
-            
-            # Run backtest
-            results = self.signal_generator.run_backtest(
-                data,
-                initial_capital=self.config.INITIAL_CAPITAL,
-                commission_pct=self.config.COMMISSION_PCT,
-                slippage_ticks=self.config.SLIPPAGE_TICKS
-            )
-            
-            # Print results
-            print("\n" + "="*50)
-            print("BACKTEST RESULTS")
-            print("="*50)
-            for metric, value in results['metrics'].items():
-                print(f"{metric:<25}: {value}")
-            
-            return results
-            
-        except Exception as e:
-            print(f"❌ Backtest failed: {e}")
+            logger.error(f"Error getting position: {e}")
             return None
     
-    async def shutdown(self):
-        """Gracefully shutdown the bot"""
-        print("🛑 Shutting down Gaussian Channel Bot...")
-        self.is_running = False
-        
+    def get_current_price(self) -> Optional[float]:
+        """Get current price for the trading symbol"""
         try:
-            # Close API connection
-            await self.api.disconnect()
-            print("✅ API connection closed")
+            mids = self.info.all_mids()
+            coin = self.info.name_to_coin[SYMBOL]
+            return float(mids[coin])
+        except Exception as e:
+            logger.error(f"Error getting current price: {e}")
+            return None
+    
+    def get_historical_data(self, hours: int = 24) -> Optional[list]:
+        """Get historical candle data"""
+        try:
+            end_time = int(time.time() * 1000)  # Current time in milliseconds
+            start_time = end_time - (hours * 60 * 60 * 1000)  # hours ago
             
-            # Save final performance metrics
-            self.performance_analyzer.save_final_metrics()
-            print("✅ Performance metrics saved")
+            candles = self.info.candles_snapshot(
+                name=SYMBOL,
+                interval="1h",
+                startTime=start_time,
+                endTime=end_time
+            )
+            
+            return candles
             
         except Exception as e:
-            print(f"❌ Error during shutdown: {e}")
+            logger.error(f"Error getting historical data: {e}")
+            return None
+    
+    def execute_signal(self, signal: dict) -> bool:
+        """Execute a trading signal using the SDK directly"""
+        try:
+            action = signal['action']
+            reason = signal['reason']
+            price = signal['price']
+            
+            logger.info(f"Executing {action} signal: {reason} @ ${price:,.2f}")
+            
+            if action == 'BUY':
+                # Open long position
+                result = self.exchange.market_open(
+                    name=SYMBOL,
+                    is_buy=True,
+                    sz=1.0  # Use full position size
+                )
+                
+            elif action == 'SELL':
+                # Close position
+                result = self.exchange.market_close(
+                    coin=SYMBOL
+                )
+            
+            if result.get("status") == "ok":
+                logger.info(f"✅ {action} order executed successfully")
+                return True
+            else:
+                logger.error(f"❌ {action} order failed: {result}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error executing signal: {e}")
+            return False
+    
+    def run_trading_cycle(self):
+        """Run one trading cycle"""
+        try:
+            # Get current position
+            position = self.get_current_position()
+            current_price = self.get_current_price()
+            
+            if current_price is None:
+                logger.warning("Could not get current price, skipping cycle")
+                return
+            
+            logger.info(f"Current price: ${current_price:,.2f}")
+            if position:
+                logger.info(f"Current position: {position['size']} @ ${position['entry_price']:,.2f} (PnL: ${position['unrealized_pnl']:,.2f})")
+            else:
+                logger.info("No current position")
+            
+            # Get historical data for signal generation
+            candles = self.get_historical_data(hours=24)
+            if not candles:
+                logger.warning("Could not get historical data, skipping cycle")
+                return
+            
+            # Convert to DataFrame for signal generation
+            df = self._candles_to_dataframe(candles)
+            
+            # Generate signals
+            df_with_signals = self.signal_generator.prepare_signals(df)
+            signals = self.signal_generator.generate_live_signals(df_with_signals)
+            
+            # Execute signals
+            for signal in signals:
+                self.execute_signal(signal)
+            
+        except Exception as e:
+            logger.error(f"Error in trading cycle: {e}")
+    
+    def _candles_to_dataframe(self, candles: list) -> 'pd.DataFrame':
+        """Convert Hyperliquid candle data to pandas DataFrame"""
+        import pandas as pd
+        
+        data = []
+        for candle in candles:
+            data.append({
+                'Date': pd.to_datetime(candle['T'], unit='ms'),
+                'Open': float(candle['o']),
+                'High': float(candle['h']),
+                'Low': float(candle['l']),
+                'Close': float(candle['c']),
+                'Volume': float(candle['v'])
+            })
+        
+        df = pd.DataFrame(data)
+        df.set_index('Date', inplace=True)
+        return df
+    
+    def run(self):
+        """Main trading loop"""
+        logger.info("Starting Gaussian Channel Bot...")
+        self.is_running = True
+        
+        try:
+            while self.is_running:
+                self.run_trading_cycle()
+                
+                # Wait for next cycle
+                logger.info(f"Waiting {TRADING_INTERVAL} seconds until next cycle...")
+                time.sleep(TRADING_INTERVAL)
+                
+        except KeyboardInterrupt:
+            logger.info("Received interrupt signal, shutting down...")
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}")
+        finally:
+            self.is_running = False
+            logger.info("Bot stopped")
 
 
-async def main():
-    """Main function to run the bot"""
+def main():
+    """Main function"""
     bot = GaussianChannelBot()
     
-    try:
-        # Initialize bot
-        if not await bot.initialize():
-            print("❌ Failed to initialize bot")
-            return
-        
-        # Check command line arguments
-        if len(sys.argv) > 1:
-            if sys.argv[1] == "backtest":
-                # Run backtest
-                await bot.run_backtest()
-            elif sys.argv[1] == "live":
-                # Run live trading
-                await bot.run_live_trading()
-            else:
-                print("Usage: python main.py [backtest|live]")
-                return
-        else:
-            # Default to live trading
-            await bot.run_live_trading()
-            
-    except KeyboardInterrupt:
-        print("\n🛑 Received interrupt signal")
-    except Exception as e:
-        print(f"❌ Unexpected error: {e}")
-    finally:
-        await bot.shutdown()
+    # Initialize bot
+    if not bot.initialize():
+        logger.error("Failed to initialize bot")
+        return
+    
+    # Print configuration
+    print_config()
+    
+    # Run the bot
+    bot.run()
 
 
 if __name__ == "__main__":
-    # Run the bot
-    asyncio.run(main()) 
+    main() 

@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
 Signal Generation Module for Gaussian Channel Strategy
-
-This module handles signal generation logic for the Gaussian Channel strategy,
-focusing on indicator calculation and signal generation for both backtesting and live trading.
 """
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
+from datetime import datetime
+from typing import Dict, List, Optional, Any
 import logging
 
 # Configure logging
@@ -19,39 +16,28 @@ logger = logging.getLogger(__name__)
 class SignalGenerator:
     """
     Signal generator for Gaussian Channel strategy
-    
-    Handles indicator calculation and signal generation for both backtesting and live trading.
-    Focuses on pure signal logic - execution is handled by backtrader or live trading system.
     """
     
-    def __init__(self, gaussian_filter, config):
+    def __init__(self, gaussian_filter, config_params):
         """
         Initialize signal generator
         
         Args:
             gaussian_filter: GaussianChannelFilter instance
-            config: Config instance with strategy parameters
+            config_params: Dictionary with strategy parameters
         """
         self.gaussian_filter = gaussian_filter
-        self.config = config
         
         # Strategy parameters from config
-        self.poles = config.POLES
-        self.period = config.PERIOD
-        self.multiplier = config.MULTIPLIER
-        self.atr_spacing = config.ATR_SPACING
-        self.max_pyramids = config.MAX_PYRAMIDS
-        self.position_size_pct = config.POSITION_SIZE_PCT
+        self.poles = config_params['POLES']
+        self.period = config_params['PERIOD']
+        self.multiplier = config_params['MULTIPLIER']
         
         # Strategy state
         self.reset_state()
     
     def reset_state(self):
         """Reset strategy state variables"""
-        self.entry_count = 0
-        self.last_entry_price = None
-        self.last_signal_check = None
-        # Add position state tracking
         self.current_position_size = 0.0  # 0 = no position, >0 = long position
         self.position_entry_price = None
         self.position_entry_date = None
@@ -103,13 +89,13 @@ class SignalGenerator:
     
     def _prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        Prepare data with all required indicators for signal generation
+        Prepare data with required indicators for signal generation
         
         Args:
             data: Raw OHLCV DataFrame
             
         Returns:
-            DataFrame with all indicators added
+            DataFrame with indicators added
         """
         # Calculate HLC3 (High, Low, Close average)
         data['hlc3'] = (data['High'] + data['Low'] + data['Close']) / 3
@@ -131,13 +117,6 @@ class SignalGenerator:
     def _calculate_rma(self, series: pd.Series, period: int) -> pd.Series:
         """
         Calculate Relative Moving Average (RMA)
-        
-        Args:
-            series: Input series
-            period: RMA period
-            
-        Returns:
-            RMA series
         """
         alpha = 1.0 / period
         rma = series.copy()
@@ -152,15 +131,15 @@ class SignalGenerator:
         """
         Prepare trading signals based on Gaussian Channel
         
-        Uses confirmed (previous bar) data for trend determination to avoid repainting,
-        and current bar data only for entry/exit decisions. This matches Pine Script behavior.
-        
         Args:
             data: DataFrame with OHLC and indicators
             
         Returns:
             DataFrame with signal columns added
         """
+        # Prepare data with indicators
+        data = self._prepare_data(data)
+        
         # === CONFIRMED DATA (non-repainting) ===
         # Use previous bar data for trend determination to avoid repainting
         src_confirmed = data['hlc3'].shift(1)  # Previous bar's hlc3
@@ -169,7 +148,7 @@ class SignalGenerator:
         # Apply Gaussian filter to confirmed bars
         filt_confirmed, hband_confirmed, lband_confirmed = self.gaussian_filter.apply_filter(src_confirmed, tr_confirmed)
         
-        # Add confirmed data to dataframe (for plotting and trend determination)
+        # Add confirmed data to dataframe
         data['filt_confirmed'] = filt_confirmed
         data['hband_confirmed'] = hband_confirmed
         data['lband_confirmed'] = lband_confirmed
@@ -185,26 +164,20 @@ class SignalGenerator:
         # Apply Gaussian filter to current bars
         filt_current, hband_current, lband_current = self.gaussian_filter.apply_filter(src_current, tr_current)
         
-        # Add current bar data to dataframe (for entries)
+        # Add current bar data to dataframe
         data['filt_current'] = filt_current
         data['hband_current'] = hband_current
         data['lband_current'] = lband_current
         
-        # === ENTRY CONDITIONS (current bar close, confirmed trend) ===
-        # Green channel entry: Current bar close above current band (confirmed trend)
-        data['green_entry'] = (
+        # === ENTRY CONDITIONS ===
+        # Entry: Current bar close above current band (confirmed trend)
+        data['entry_signal'] = (
             data['green_channel'] &  # Confirmed trend (non-repainting)
             (data['Close'] > hband_current)  # Current bar close
         )
         
-        # Red channel entry: Current bar close above current band (confirmed trend)
-        data['red_entry'] = (
-            ~data['green_channel'] &  # Confirmed trend (non-repainting)
-            (data['Close'] > hband_current)  # Current bar close
-        )
-        
-        # === EXIT CONDITION (using current bar data) ===
-        # Exit condition (closes all positions) - FAST EXIT using current bar data
+        # === EXIT CONDITION ===
+        # Exit condition (closes all positions)
         data['exit_signal'] = (data['Close'] < hband_current)
         
         # === SUFFICIENT DATA CHECK ===
@@ -213,8 +186,7 @@ class SignalGenerator:
         data['sufficient_data'] = sufficient_data
         
         # Apply sufficient data filter to entries
-        data['green_entry'] = data['green_entry'] & sufficient_data
-        data['red_entry'] = data['red_entry'] & sufficient_data
+        data['entry_signal'] = data['entry_signal'] & sufficient_data
         
         return data
     
@@ -226,7 +198,7 @@ class SignalGenerator:
             current_data: DataFrame with current market data and indicators
             
         Returns:
-            List of signal dictionaries with action, size, and reason
+            List of signal dictionaries with action and reason
         """
         signals = []
         
@@ -237,44 +209,37 @@ class SignalGenerator:
         i = len(current_data) - 1
         current_date = current_data.index[i]
         current_price = current_data['Close'].iloc[i]
-        atr_val = current_data['atr'].iloc[i]
         
-        # === POSITION STATE TRACKING (matches Pine Script strategy.position_size) ===
-        # Check if we have entry signals
-        green_entry_signal = current_data['green_entry'].iloc[i]
-        red_entry_signal = current_data['red_entry'].iloc[i]
+        # Check signals
+        entry_signal = current_data['entry_signal'].iloc[i]
         exit_signal = current_data['exit_signal'].iloc[i]
         
-        # === ENTRY LOGIC (matches Pine Script baseEntryCondition) ===
-        # Base entry condition: (greenEntry or redEntry) and strategy.position_size == 0
-        can_enter = (green_entry_signal or red_entry_signal) and self.current_position_size == 0
-        
-        if can_enter:
-            # Update position state (matches Pine Script entry logic)
-            self.current_position_size = self.position_size_pct
+        # === ENTRY LOGIC ===
+        # Entry condition: entry signal and no current position
+        if entry_signal and self.current_position_size == 0:
+            # Update position state
+            self.current_position_size = 1.0  # Full position
             self.position_entry_price = current_price
             self.position_entry_date = current_date
             
             signals.append({
                 'action': 'BUY',
-                'size': self.position_size_pct,
-                'reason': f'Base Entry - {"Green" if green_entry_signal else "Red"} Channel',
+                'reason': 'Gaussian Channel Entry Signal',
                 'price': current_price,
                 'timestamp': current_date
             })
         
-        # === EXIT LOGIC (matches Pine Script exitCondition) ===
-        # Exit condition: close < hband_realtime and strategy.position_size > 0
+        # === EXIT LOGIC ===
+        # Exit condition: exit signal and have position
         if exit_signal and self.current_position_size > 0:
-            # Reset position state (matches Pine Script close_all logic)
+            # Reset position state
             self.current_position_size = 0.0
             self.position_entry_price = None
             self.position_entry_date = None
             
             signals.append({
                 'action': 'SELL',
-                'size': 1.0,  # Close entire position
-                'reason': 'Signal Exit - Close below upper band',
+                'reason': 'Gaussian Channel Exit Signal',
                 'price': current_price,
                 'timestamp': current_date
             })
@@ -291,26 +256,23 @@ class SignalGenerator:
         Returns:
             Dictionary with signal statistics
         """
-        if 'green_entry' not in data.columns:
+        if 'entry_signal' not in data.columns:
             return {}
         
         total_bars = len(data)
-        green_entries = data['green_entry'].sum()
-        red_entries = data['red_entry'].sum()
+        entries = data['entry_signal'].sum()
         exits = data['exit_signal'].sum()
         
         return {
             'total_bars': total_bars,
-            'green_entries': green_entries,
-            'red_entries': red_entries,
-            'total_entries': green_entries + red_entries,
+            'entries': entries,
             'exits': exits,
-            'entry_rate': (green_entries + red_entries) / total_bars if total_bars > 0 else 0
+            'entry_rate': entries / total_bars if total_bars > 0 else 0
         }
     
     def get_position_state(self) -> Dict[str, Any]:
         """
-        Get current position state for debugging and monitoring
+        Get current position state for monitoring
         
         Returns:
             Dictionary with current position information
