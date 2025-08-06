@@ -24,7 +24,7 @@ PERIOD = int(os.getenv('GAUSSIAN_PERIOD', '144'))
 MULTIPLIER = float(os.getenv('GAUSSIAN_MULTIPLIER', '1.414'))
 
 # === TIMING PARAMETERS ===
-TRADING_INTERVAL = int(os.getenv('TRADING_INTERVAL', '86400'))  # 24 hours
+TRADING_INTERVAL = int(os.getenv('TRADING_INTERVAL', '3600'))   # 1 hour
 
 # === LOGGING ===
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
@@ -67,7 +67,7 @@ def print_config():
     print(f"  Period: {PERIOD}")
     print(f"  Multiplier: {MULTIPLIER}")
     print()
-    print(f"Trading Interval: {TRADING_INTERVAL} seconds")
+    print(f"Trading Interval: {TRADING_INTERVAL} seconds ({TRADING_INTERVAL//3600} hour{'s' if TRADING_INTERVAL//3600 != 1 else ''})")
     print("="*50)
 
 # Validate configuration on import
