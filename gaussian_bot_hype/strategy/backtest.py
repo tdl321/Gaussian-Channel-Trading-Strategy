@@ -159,16 +159,18 @@ class GaussianChannelStrategy(bt.Strategy):
         if np.isnan(current_filt_confirmed) or np.isnan(current_hband) or np.isnan(current_filt):
             return
         
-        # === ENTRY CONDITIONS (current bar close, confirmed trend) ===
+        # === GREEN CHANNEL CONDITION (Current Bar) ===
+        # Define "green channel" when current filter is rising (vs previous current bar)
+        if len(self.filt_values) >= 2:
+            green_channel_realtime = current_filt > self.filt_values[-2]
+        else:
+            green_channel_realtime = False
+        
+        # === ENTRY CONDITIONS (Simplified) ===
         current_close = self.data.close[0]
         
-        # Green channel entry: Current bar close above current band (confirmed trend)
-        green_entry = green_channel and current_close > current_hband
-        
-        # Red channel entry: Current bar close above current band (confirmed trend)
-        red_entry = not green_channel and current_close > current_hband
-        
-        can_enter = green_entry or red_entry
+        # Entry: Current bar close above current band (regardless of channel color)
+        can_enter = current_close > current_hband
         
         # === EXIT CONDITION (using current bar data) ===
         exit_signal = current_close < current_hband
@@ -290,11 +292,13 @@ def analyze_backtrader_results(cerebro):
     
     # Get strategy instance (access from cerebro after running)
     strategy = None
-    if hasattr(cerebro, 'strats') and cerebro.strats:
-        # The strategy is stored as a tuple, we need to access it correctly
-        strategy_tuple = cerebro.strats[0]
-        if isinstance(strategy_tuple, tuple) and len(strategy_tuple) > 0:
-            strategy = strategy_tuple[0]
+    if hasattr(cerebro, 'runstrats') and cerebro.runstrats:
+        # The strategy instance is stored in runstrats
+        strategy_list = cerebro.runstrats[0]
+        if isinstance(strategy_list, list) and len(strategy_list) > 0:
+            strategy = strategy_list[0]  # First strategy instance
+    elif hasattr(cerebro, 'strategy') and cerebro.strategy:
+        strategy = cerebro.strategy
     
     # Basic metrics
     metrics = {

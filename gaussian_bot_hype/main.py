@@ -123,15 +123,15 @@ class GaussianChannelBot:
             logger.error(f"Error getting current price: {e}")
             return None
     
-    def get_historical_data(self, hours: int = 24) -> Optional[list]:
-        """Get historical candle data"""
+    def get_daily_data(self, days: int = 200) -> Optional[list]:
+        """Get daily candle data for strategy calculation"""
         try:
             end_time = int(time.time() * 1000)  # Current time in milliseconds
-            start_time = end_time - (hours * 60 * 60 * 1000)  # hours ago
+            start_time = end_time - (days * 24 * 60 * 60 * 1000)  # days ago
             
             candles = self.info.candles_snapshot(
                 name=SYMBOL,
-                interval="1h",
+                interval="1d",  # Daily candles for strategy calculation
                 startTime=start_time,
                 endTime=end_time
             )
@@ -139,15 +139,15 @@ class GaussianChannelBot:
             return candles
             
         except Exception as e:
-            logger.error(f"Error getting historical data: {e}")
+            logger.error(f"Error getting daily data: {e}")
             return None
     
     def execute_signal(self, signal: dict) -> bool:
         """Execute a trading signal using the SDK directly"""
         try:
             action = signal['action']
-            reason = signal['reason']
-            price = signal['price']
+            reason = signal.get('reason', 'No reason provided')
+            price = signal.get('price', 0)
             
             logger.info(f"Executing {action} signal: {reason} @ ${price:,.2f}")
             
@@ -164,6 +164,9 @@ class GaussianChannelBot:
                 result = self.exchange.market_close(
                     coin=SYMBOL
                 )
+            else:
+                logger.error(f"Unknown action: {action}")
+                return False
             
             if result.get("status") == "ok":
                 logger.info(f"✅ {action} order executed successfully")
@@ -177,9 +180,9 @@ class GaussianChannelBot:
             return False
     
     def run_trading_cycle(self):
-        """Run one trading cycle"""
+        """Run one trading cycle - check current price vs daily bands"""
         try:
-            # Get current position
+            # Get current position and price
             position = self.get_current_position()
             current_price = self.get_current_price()
             
@@ -193,22 +196,46 @@ class GaussianChannelBot:
             else:
                 logger.info("No current position")
             
-            # Get historical data for signal generation
-            candles = self.get_historical_data(hours=24)
-            if not candles:
-                logger.warning("Could not get historical data, skipping cycle")
+            # Get daily data for strategy calculation (144+ days needed for Gaussian filter)
+            daily_candles = self.get_daily_data(days=200)
+            if not daily_candles:
+                logger.warning("Could not get daily data, skipping cycle")
                 return
             
-            # Convert to DataFrame for signal generation
-            df = self._candles_to_dataframe(candles)
+            # Calculate daily bands using strategy
+            df_daily = self._candles_to_dataframe(daily_candles)
+            df_with_signals = self.signal_generator.prepare_signals(df_daily)
             
-            # Generate signals
-            df_with_signals = self.signal_generator.prepare_signals(df)
-            signals = self.signal_generator.generate_live_signals(df_with_signals)
+            # Get latest daily bands
+            if len(df_with_signals) == 0:
+                logger.warning("No daily signals calculated, skipping cycle")
+                return
+                
+            latest_bands = df_with_signals.iloc[-1]
+            upper_band = latest_bands['hband_current']
             
-            # Execute signals
-            for signal in signals:
-                self.execute_signal(signal)
+            logger.info(f"Daily upper band: ${upper_band:,.2f}")
+            
+            # Check current price vs daily bands for entry/exit
+            if current_price > upper_band and not position:
+                # ENTER signal: Current price above daily upper band
+                logger.info(f"🟢 ENTRY SIGNAL: Price ${current_price:,.2f} > Daily Band ${upper_band:,.2f}")
+                self.execute_signal({
+                    'action': 'BUY',
+                    'reason': 'Price above daily Gaussian upper band',
+                    'price': current_price
+                })
+                
+            elif current_price < upper_band and position:
+                # EXIT signal: Current price below daily upper band
+                logger.info(f"🔴 EXIT SIGNAL: Price ${current_price:,.2f} < Daily Band ${upper_band:,.2f}")
+                self.execute_signal({
+                    'action': 'SELL',
+                    'reason': 'Price below daily Gaussian upper band',
+                    'price': current_price
+                })
+            else:
+                logger.info(f"⏸️  No signal: Price ${current_price:,.2f} vs Band ${upper_band:,.2f}")
             
         except Exception as e:
             logger.error(f"Error in trading cycle: {e}")

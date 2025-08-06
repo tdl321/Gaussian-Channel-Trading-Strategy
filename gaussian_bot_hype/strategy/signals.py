@@ -169,12 +169,13 @@ class SignalGenerator:
         data['hband_current'] = hband_current
         data['lband_current'] = lband_current
         
-        # === ENTRY CONDITIONS ===
-        # Entry: Current bar close above current band (confirmed trend)
-        data['entry_signal'] = (
-            data['green_channel'] &  # Confirmed trend (non-repainting)
-            (data['Close'] > hband_current)  # Current bar close
-        )
+        # === GREEN CHANNEL CONDITION (Current Bar) ===
+        # Define "green channel" when current filter is rising (vs previous current bar)
+        data['green_channel_realtime'] = (filt_current > filt_current.shift(1)).fillna(False)
+        
+        # === ENTRY CONDITIONS (Simplified) ===
+        # Entry: Current bar close above current band (regardless of channel color)
+        data['entry_signal'] = (data['Close'] > hband_current)
         
         # === EXIT CONDITION ===
         # Exit condition (closes all positions)
