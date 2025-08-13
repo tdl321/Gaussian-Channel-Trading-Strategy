@@ -27,19 +27,19 @@ class GaussianChannelStrategy(bt.Strategy):
     Gaussian Channel Strategy implemented as a backtrader strategy
     
     This strategy implements the Gaussian Channel filter with:
-    - Long-only trend following
+    - Long-only trend following (matches live trading exactly)
     - Dynamic exit based on price closing below upper band
-    - Configurable parameters for poles, period, and multiplier
+    - 6 poles, 144 period, 1.414 multiplier (matches live trading)
+    - No pyramiding or ATR spacing (simplified)
+    - 100% position size per trade
     """
     
     params = (
-        ('poles', 4),                    # Number of poles for Gaussian filter
+        ('poles', 6),                    # Number of poles for Gaussian filter (matches live trading)
         ('period', 144),                 # Sampling period for Gaussian filter
         ('multiplier', 1.414),           # Band width multiplier
-        ('atr_spacing', 2.0),            # ATR spacing for pyramiding (currently disabled)
-        ('max_pyramids', 0),             # Maximum pyramiding entries (0 = disabled)
-        ('position_size_pct', 1.0),      # Position size as percentage of portfolio
-        ('atr_period', 14),              # ATR calculation period
+        ('position_size_pct', 1.0),      # Position size as percentage of portfolio (100%)
+        ('atr_period', 14),              # ATR calculation period (needed for channel calculation)
     )
     
     def __init__(self):
@@ -61,13 +61,9 @@ class GaussianChannelStrategy(bt.Strategy):
         self.tr3 = self.data.low - self.data.close(-1)   # Previous close
         # We'll calculate the max in the next() method since we need to handle abs() manually
         
-        # ATR calculation removed since we're not using it in the current strategy
-        # self.atr = bt.indicators.EMA(self.true_range, period=self.params.atr_period)
-        
-        # Strategy state variables
+        # Strategy state variables (simplified to match live trading)
         self.entry_count = 0
         self.last_entry_price = None
-        self.sufficient_data = False
         
         # Store calculated values for signal generation
         self.filt_values = []
@@ -166,19 +162,19 @@ class GaussianChannelStrategy(bt.Strategy):
         else:
             green_channel_realtime = False
         
-        # === ENTRY CONDITIONS (Simplified) ===
+        # === ENTRY/EXIT CONDITIONS (matches live trading exactly) ===
         current_close = self.data.close[0]
         
-        # Entry: Current bar close above current band (regardless of channel color)
+        # Entry: Current bar close above current band (matches live trading)
         can_enter = current_close > current_hband
         
-        # === EXIT CONDITION (using current bar data) ===
+        # Exit: Current bar close below current band (matches live trading)
         exit_signal = current_close < current_hband
         
-        # === TRADING LOGIC ===
+        # === TRADING LOGIC (simplified to match live trading) ===
         if not self.position:  # No position
             if can_enter:
-                # Calculate position size
+                # Calculate position size (100% of available cash)
                 size = self.broker.getcash() * self.params.position_size_pct / current_close
                 self.buy(size=size)
                 self.entry_count = 1
