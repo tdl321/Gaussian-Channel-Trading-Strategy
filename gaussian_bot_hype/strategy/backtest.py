@@ -65,6 +65,11 @@ class GaussianChannelStrategy(bt.Strategy):
         self.entry_count = 0
         self.last_entry_price = None
         
+        # Store all historical data for Gaussian filter calculation
+        self.hlc3_history = []
+        self.tr_history = []
+        self.close_history = []
+        
         # Store calculated values for signal generation
         self.filt_values = []
         self.hband_values = []
@@ -80,55 +85,15 @@ class GaussianChannelStrategy(bt.Strategy):
         """
         Main strategy logic - called for each bar
         
-        This method implements the Gaussian Channel strategy with non-repainting logic:
-        1. Use confirmed (previous bar) data for trend determination
-        2. Use current bar data for entry/exit decisions
-        3. Execute trades based on signals
+        This method implements the EXACT same logic as live trading:
+        1. Apply Gaussian filter to current data
+        2. Entry: Close > current upper band
+        3. Exit: Close < current upper band
+        4. No green channel requirement (simplified like live trading)
         """
-        # Skip if not enough data for Gaussian filter
-        if len(self.data) < self.params.period + 25:
-            return
-        
-        # === CONFIRMED DATA (non-repainting) ===
-        # Use previous bar data for trend determination to avoid repainting
-        if len(self.data) < 2:
-            return  # Need at least 2 bars for confirmed data
-        
-        # Previous bar data (confirmed)
-        prev_hlc3 = self.hlc3[-1]  # Previous bar's hlc3
-        
-        # Calculate True Range for previous bar
-        prev_tr1 = self.tr1[-1]  # High - Low
-        prev_tr2 = abs(self.tr2[-1])  # abs(High - Previous Close)
-        prev_tr3 = abs(self.tr3[-1])  # abs(Low - Previous Close)
-        prev_tr = max(prev_tr1, prev_tr2, prev_tr3)
-        
-        # Apply Gaussian filter to confirmed data
-        filt_confirmed, hband_confirmed, lband_confirmed = self.gaussian_filter.apply_filter(
-            pd.Series([prev_hlc3]), 
-            pd.Series([prev_tr])
-        )
-        
-        # Store confirmed values
-        current_filt_confirmed = filt_confirmed.iloc[0] if not filt_confirmed.empty else np.nan
-        current_hband_confirmed = hband_confirmed.iloc[0] if not hband_confirmed.empty else np.nan
-        current_lband_confirmed = lband_confirmed.iloc[0] if not lband_confirmed.empty else np.nan
-        
-        self.filt_confirmed_values.append(current_filt_confirmed)
-        self.hband_confirmed_values.append(current_hband_confirmed)
-        self.lband_confirmed_values.append(current_lband_confirmed)
-        
-        # Determine green channel (non-repainting) - Based on confirmed data
-        if len(self.filt_confirmed_values) >= 2:
-            green_channel = self.filt_confirmed_values[-1] > self.filt_confirmed_values[-2]
-        else:
-            green_channel = False
-        
-        self.green_channel_values.append(green_channel)
-        
-        # === CURRENT BAR DATA (for entries only) ===
-        # Use current bar data for entry/exit decisions (0-bar delay)
-        current_hlc3 = self.hlc3[0]  # Current bar's hlc3
+        # Get current bar data
+        current_hlc3 = self.hlc3[0]
+        current_close = self.data.close[0]
         
         # Calculate True Range for current bar
         tr1 = self.tr1[0]  # High - Low
@@ -136,48 +101,53 @@ class GaussianChannelStrategy(bt.Strategy):
         tr3 = abs(self.tr3[0])  # abs(Low - Previous Close)
         current_tr = max(tr1, tr2, tr3)
         
-        # Apply Gaussian filter to current bar
-        filt_current, hband_current, lband_current = self.gaussian_filter.apply_filter(
-            pd.Series([current_hlc3]), 
-            pd.Series([current_tr])
+        # Accumulate historical data
+        self.hlc3_history.append(current_hlc3)
+        self.tr_history.append(current_tr)
+        self.close_history.append(current_close)
+        
+        # Skip if not enough data for Gaussian filter (need period + buffer)
+        min_required = self.params.period + 25
+        if len(self.hlc3_history) < min_required:
+            return
+        
+        # Apply Gaussian filter to accumulated data (EXACT same as live trading)
+        hlc3_series = pd.Series(self.hlc3_history)
+        tr_series = pd.Series(self.tr_history)
+        
+        # Apply the filter
+        filt_result, hband_result, lband_result = self.gaussian_filter.apply_filter(
+            hlc3_series, tr_series
         )
         
-        # Store current values
-        current_filt = filt_current.iloc[0] if not filt_current.empty else np.nan
-        current_hband = hband_current.iloc[0] if not hband_current.empty else np.nan
-        current_lband = lband_current.iloc[0] if not lband_current.empty else np.nan
+        # Get current values (EXACT same as live trading)
+        current_filt = filt_result.iloc[-1]
+        current_hband = hband_result.iloc[-1]
+        current_lband = lband_result.iloc[-1]
         
+        # Skip if we don't have valid filter values
+        if np.isnan(current_filt) or np.isnan(current_hband):
+            return
+        
+        # Store values for analysis
         self.filt_values.append(current_filt)
         self.hband_values.append(current_hband)
         self.lband_values.append(current_lband)
         
-        # Skip if we don't have valid filter values
-        if np.isnan(current_filt_confirmed) or np.isnan(current_hband) or np.isnan(current_filt):
-            return
-        
-        # === GREEN CHANNEL CONDITION (Current Bar) ===
-        # Define "green channel" when current filter is rising (vs previous current bar)
-        if len(self.filt_values) >= 2:
-            green_channel_realtime = current_filt > self.filt_values[-2]
-        else:
-            green_channel_realtime = False
-        
-        # === ENTRY/EXIT CONDITIONS (matches live trading exactly) ===
-        current_close = self.data.close[0]
-        
-        # Entry: Current bar close above current band (matches live trading)
+        # === ENTRY/EXIT CONDITIONS (EXACT same as live trading) ===
+        # Entry: Current bar close above current band (regardless of channel color)
         can_enter = current_close > current_hband
         
-        # Exit: Current bar close below current band (matches live trading)
+        # Exit: Current bar close below current band
         exit_signal = current_close < current_hband
         
-        # === TRADING LOGIC (simplified to match live trading) ===
+        # === TRADING LOGIC (EXACT same as live trading) ===
         if not self.position:  # No position
             if can_enter:
                 # Calculate position size (100% of available cash)
                 size = self.broker.getcash() * self.params.position_size_pct / current_close
                 self.buy(size=size)
-                self.entry_count = 1
+                self.entry_count += 1
                 self.last_entry_price = current_close
                 self.log(f'BUY EXECUTED: {current_close:.2f}, Size: {size:.2f}')
         
@@ -185,7 +155,6 @@ class GaussianChannelStrategy(bt.Strategy):
             if exit_signal:
                 # Close entire position
                 self.close()
-                self.entry_count = 0
                 self.last_entry_price = None
                 self.log(f'SELL EXECUTED: {current_close:.2f}')
     
@@ -206,11 +175,21 @@ def create_backtrader_datafeed(data, datetime_col='Date'):
     Returns:
         backtrader.feeds.PandasData object
     """
-    # Ensure datetime index
-    if datetime_col in data.columns:
+    # Ensure data has proper datetime index
+    if not isinstance(data.index, pd.DatetimeIndex):
         data = data.copy()
-        data[datetime_col] = pd.to_datetime(data[datetime_col])
-        data.set_index(datetime_col, inplace=True)
+        if datetime_col in data.columns:
+            data[datetime_col] = pd.to_datetime(data[datetime_col])
+            data.set_index(datetime_col, inplace=True)
+        else:
+            # Assume index should be datetime
+            data.index = pd.to_datetime(data.index)
+    
+    # Verify data has required columns
+    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    missing_columns = [col for col in required_columns if col not in data.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {missing_columns}")
     
     # Create backtrader data feed
     datafeed = bt.feeds.PandasData(
@@ -248,9 +227,14 @@ def run_backtrader_backtest(data, strategy_class, strategy_params=None,
     # Create Cerebro engine
     cerebro = bt.Cerebro()
     
-    # Add data feed
-    datafeed = create_backtrader_datafeed(data)
-    cerebro.adddata(datafeed)
+    # Add data feed with error checking
+    try:
+        datafeed = create_backtrader_datafeed(data)
+        cerebro.adddata(datafeed)
+        print(f"✅ Data feed added successfully")
+    except Exception as e:
+        print(f"❌ Error creating data feed: {e}")
+        raise
     
     # Configure broker
     cerebro.broker.setcash(initial_cash)
@@ -259,14 +243,24 @@ def run_backtrader_backtest(data, strategy_class, strategy_params=None,
     # Note: set_margin is not available in standard backtrader
     # Margin handling is done at the strategy level
     
-    # Add strategy
-    if strategy_params:
-        cerebro.addstrategy(strategy_class, **strategy_params)
-    else:
-        cerebro.addstrategy(strategy_class)
+    # Add strategy with error checking
+    try:
+        if strategy_params:
+            cerebro.addstrategy(strategy_class, **strategy_params)
+        else:
+            cerebro.addstrategy(strategy_class)
+        print(f"✅ Strategy added successfully")
+    except Exception as e:
+        print(f"❌ Error adding strategy: {e}")
+        raise
     
     # Run backtest
-    cerebro.run()
+    try:
+        cerebro.run()
+        print(f"✅ Backtest completed successfully")
+    except Exception as e:
+        print(f"❌ Error running backtest: {e}")
+        raise
     
     return cerebro
 
@@ -286,15 +280,19 @@ def analyze_backtrader_results(cerebro):
     initial_value = cerebro.broker.startingcash
     total_return = (final_value - initial_value) / initial_value
     
-    # Get strategy instance (access from cerebro after running)
+    # More robust strategy instance retrieval
     strategy = None
-    if hasattr(cerebro, 'runstrats') and cerebro.runstrats:
-        # The strategy instance is stored in runstrats
-        strategy_list = cerebro.runstrats[0]
-        if isinstance(strategy_list, list) and len(strategy_list) > 0:
-            strategy = strategy_list[0]  # First strategy instance
-    elif hasattr(cerebro, 'strategy') and cerebro.strategy:
-        strategy = cerebro.strategy
+    try:
+        if hasattr(cerebro, 'runstrats') and cerebro.runstrats:
+            strategy_list = cerebro.runstrats[0]
+            if isinstance(strategy_list, list) and len(strategy_list) > 0:
+                strategy = strategy_list[0]  # First strategy instance
+        elif hasattr(cerebro, 'strategy') and cerebro.strategy:
+            strategy = cerebro.strategy
+        elif hasattr(cerebro, '_strategy') and cerebro._strategy:
+            strategy = cerebro._strategy
+    except Exception as e:
+        print(f"Warning: Could not retrieve strategy instance: {e}")
     
     # Basic metrics
     metrics = {
