@@ -169,9 +169,9 @@ class SignalGenerator:
         data['hband_current'] = hband_current
         data['lband_current'] = lband_current
         
-        # === GREEN CHANNEL CONDITION (Current Bar) ===
-        # Define "green channel" when current filter is rising (vs previous current bar)
-        data['green_channel_realtime'] = (filt_current > filt_current.shift(1)).fillna(False)
+        # === CHANNEL BULLISH CONDITION (Current Bar) ===
+        # Define "bullish channel" when current filter is rising (vs previous current bar)
+        data['channel_bullish'] = (filt_current > filt_current.shift(1)).fillna(False)  # Optional: for trend analysis/plotting
         
         # === ENTRY CONDITIONS (Simplified) ===
         # Entry: Current bar close above current band (regardless of channel color)

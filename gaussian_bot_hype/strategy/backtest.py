@@ -18,8 +18,9 @@ warnings.filterwarnings('ignore')
 # Backtrader for professional backtesting
 import backtrader as bt
 
-# Import our Gaussian filter from the separate module
+# Import our Gaussian filter and signal generator from the separate modules
 from .gaussian_filter import GaussianChannelFilter, calculate_rma
+from .signals import SignalGenerator
 
 
 class GaussianChannelStrategy(bt.Strategy):
@@ -44,124 +45,111 @@ class GaussianChannelStrategy(bt.Strategy):
     
     def __init__(self):
         """Initialize the strategy with indicators"""
-        # Initialize Gaussian filter
+        # Initialize Gaussian filter (EXACT same as live trading)
         self.gaussian_filter = GaussianChannelFilter(
             poles=self.params.poles,
             period=self.params.period,
             multiplier=self.params.multiplier
         )
         
-        # Calculate HLC3 (High, Low, Close average)
-        self.hlc3 = (self.data.high + self.data.low + self.data.close) / 3
+        # Initialize signal generator (EXACT same as live trading)
+        config_params = {
+            'POLES': self.params.poles,
+            'PERIOD': self.params.period,
+            'MULTIPLIER': self.params.multiplier
+        }
+        self.signal_generator = SignalGenerator(self.gaussian_filter, config_params)
         
-        # Calculate True Range
-        self.tr1 = self.data.high - self.data.low
-        # Use simple arithmetic for absolute values since bt.indicators.Abs doesn't exist
-        self.tr2 = self.data.high - self.data.close(-1)  # Previous close
-        self.tr3 = self.data.low - self.data.close(-1)   # Previous close
-        # We'll calculate the max in the next() method since we need to handle abs() manually
-        
-        # Strategy state variables (simplified to match live trading)
+        # Strategy state variables (EXACT same as live trading)
         self.entry_count = 0
         self.last_entry_price = None
         
-        # Store all historical data for Gaussian filter calculation
-        self.hlc3_history = []
-        self.tr_history = []
-        self.close_history = []
-        
-        # Store calculated values for signal generation
-        self.filt_values = []
-        self.hband_values = []
-        self.lband_values = []
-        self.green_channel_values = []
-        
-        # Store confirmed values for non-repainting
-        self.filt_confirmed_values = []
-        self.hband_confirmed_values = []
-        self.lband_confirmed_values = []
+        # Store all historical data for signal generation (EXACT same as live trading)
+        self.data_history = []
+        self.current_bar_data = {}
         
     def next(self):
         """
         Main strategy logic - called for each bar
         
-        This method implements the EXACT same logic as live trading:
-        1. Apply Gaussian filter to current data
-        2. Entry: Close > current upper band
-        3. Exit: Close < current upper band
-        4. No green channel requirement (simplified like live trading)
+        This method implements the EXACT same logic as live trading using SignalGenerator:
+        1. Prepare current bar data
+        2. Use SignalGenerator to generate signals (EXACT same as live trading)
+        3. Execute trades based on signals
         """
-        # Get current bar data
-        current_hlc3 = self.hlc3[0]
-        current_close = self.data.close[0]
+        # Get current bar data (EXACT same format as live trading)
+        current_date = self.datas[0].datetime.date(0)
+        current_bar = {
+            'Date': current_date,
+            'Open': self.data.open[0],
+            'High': self.data.high[0],
+            'Low': self.data.low[0],
+            'Close': self.data.close[0],
+            'Volume': self.data.volume[0]
+        }
         
-        # Calculate True Range for current bar
-        tr1 = self.tr1[0]  # High - Low
-        tr2 = abs(self.tr2[0])  # abs(High - Previous Close)
-        tr3 = abs(self.tr3[0])  # abs(Low - Previous Close)
-        current_tr = max(tr1, tr2, tr3)
-        
-        # Accumulate historical data
-        self.hlc3_history.append(current_hlc3)
-        self.tr_history.append(current_tr)
-        self.close_history.append(current_close)
+        # Add current bar to history (EXACT same as live trading)
+        self.data_history.append(current_bar)
         
         # Skip if not enough data for Gaussian filter (need period + buffer)
         min_required = self.params.period + 25
-        if len(self.hlc3_history) < min_required:
+        if len(self.data_history) < min_required:
+            self.log(f'Waiting for enough data: {len(self.data_history)}/{min_required}')
             return
         
-        # Apply Gaussian filter to accumulated data (EXACT same as live trading)
-        hlc3_series = pd.Series(self.hlc3_history)
-        tr_series = pd.Series(self.tr_history)
+        # Convert history to DataFrame (EXACT same as live trading)
+        df = pd.DataFrame(self.data_history)
+        df.set_index('Date', inplace=True)
         
-        # Apply the filter
-        filt_result, hband_result, lband_result = self.gaussian_filter.apply_filter(
-            hlc3_series, tr_series
-        )
+        # Use SignalGenerator to prepare signals (EXACT same as live trading)
+        df_with_signals = self.signal_generator.prepare_signals(df)
         
-        # Get current values (EXACT same as live trading)
-        current_filt = filt_result.iloc[-1]
-        current_hband = hband_result.iloc[-1]
-        current_lband = lband_result.iloc[-1]
+        # Get current bar signals (EXACT same as live trading)
+        current_index = len(df_with_signals) - 1
+        entry_signal = df_with_signals['entry_signal'].iloc[current_index]
+        exit_signal = df_with_signals['exit_signal'].iloc[current_index]
+        
+        # Get current values for logging
+        current_close = self.data.close[0]
+        current_hband = df_with_signals['hband_current'].iloc[current_index]
+        current_filt = df_with_signals['filt_current'].iloc[current_index]
         
         # Skip if we don't have valid filter values
         if np.isnan(current_filt) or np.isnan(current_hband):
             return
         
-        # Store values for analysis
-        self.filt_values.append(current_filt)
-        self.hband_values.append(current_hband)
-        self.lband_values.append(current_lband)
-        
-        # === ENTRY/EXIT CONDITIONS (EXACT same as live trading) ===
-        # Entry: Current bar close above current band (regardless of channel color)
-        can_enter = current_close > current_hband
-        
-        # Exit: Current bar close below current band
-        exit_signal = current_close < current_hband
+        # === DIAGNOSTIC LOGGING (Every bar for complete visibility) ===
+        self.log(
+            f'Close={current_close:.2f}, Filt={current_filt:.2f}, '
+            f'HBand={current_hband:.2f}, Entry={"YES" if entry_signal else "NO"}, Exit={"YES" if exit_signal else "NO"}'
+        )
         
         # === TRADING LOGIC (EXACT same as live trading) ===
-        if not self.position:  # No position
-            if can_enter:
-                # Calculate position size (100% of available cash)
+        if not self.position:
+            if entry_signal:
                 size = self.broker.getcash() * self.params.position_size_pct / current_close
                 self.buy(size=size)
                 self.entry_count += 1
                 self.last_entry_price = current_close
-                self.log(f'BUY EXECUTED: {current_close:.2f}, Size: {size:.2f}')
-        
-        else:  # Have position
+        else:
             if exit_signal:
-                # Close entire position
                 self.close()
                 self.last_entry_price = None
-                self.log(f'SELL EXECUTED: {current_close:.2f}')
     
     def log(self, txt, dt=None):
-        """Logging function for strategy events"""
         dt = dt or self.datas[0].datetime.date(0)
         print(f'{dt.isoformat()}: {txt}')
+
+    def notify_order(self, order):
+        if order.status in [order.Completed]:
+            if order.isbuy():
+                self.log(f'BUY EXECUTED: {order.executed.price:.2f}, Size: {order.executed.size:.4f}')
+            elif order.issell():
+                self.log(f'SELL EXECUTED: {order.executed.price:.2f}, Size: {order.executed.size:.4f}')
+
+    def notify_trade(self, trade):
+        if trade.isclosed:
+            self.log(f'TRADE CLOSED: Gross PnL: {trade.pnl:.2f}, Net PnL: {trade.pnlcomm:.2f}')
 
 
 def create_backtrader_datafeed(data, datetime_col='Date'):
@@ -208,7 +196,7 @@ def create_backtrader_datafeed(data, datetime_col='Date'):
 
 def run_backtrader_backtest(data, strategy_class, strategy_params=None, 
                           initial_cash=10000, commission=0.001, 
-                          slippage_perc=0.01, margin=0.2):
+                          slippage_perc=0.01, margin=0.2, debug_mode=False):
     """
     Run backtest using backtrader
     
@@ -239,16 +227,25 @@ def run_backtrader_backtest(data, strategy_class, strategy_params=None,
     # Configure broker
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.setcommission(commission=commission)
+    
+    # Handle slippage (set to 0 for debugging if requested)
+    if debug_mode:
+        print(f"🔧 DEBUG MODE: Setting slippage to 0 for testing")
+        slippage_perc = 0
+    
     cerebro.broker.set_slippage_perc(slippage_perc)
+    print(f"💰 Broker configured: Cash=${initial_cash}, Commission={commission*100}%, Slippage={slippage_perc*100}%")
+    
     # Note: set_margin is not available in standard backtrader
     # Margin handling is done at the strategy level
     
     # Add strategy with error checking
     try:
-        if strategy_params:
-            cerebro.addstrategy(strategy_class, **strategy_params)
+        if strategy_class is None:
+            # Use default GaussianChannelStrategy
+            cerebro.addstrategy(GaussianChannelStrategy, **strategy_params) if strategy_params else cerebro.addstrategy(GaussianChannelStrategy)
         else:
-            cerebro.addstrategy(strategy_class)
+            cerebro.addstrategy(strategy_class, **strategy_params) if strategy_params else cerebro.addstrategy(strategy_class)
         print(f"✅ Strategy added successfully")
     except Exception as e:
         print(f"❌ Error adding strategy: {e}")
