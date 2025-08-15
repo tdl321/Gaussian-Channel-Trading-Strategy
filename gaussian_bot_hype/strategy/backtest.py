@@ -131,10 +131,11 @@ class PositionManager:
         if not self.in_position:
             return None
         
-        # Calculate exit values
-        exit_value = self.position_size * price
-        pnl = exit_value - self.entry_value
-        pnl_pct = (pnl / self.entry_value) * 100
+        # Calculate exit values with proper leverage PnL calculation
+        price_change_pct = (price - self.entry_price) / self.entry_price
+        pnl_pct = price_change_pct * self.leverage * 100  # Leveraged PnL percentage
+        pnl = self.entry_value * (pnl_pct / 100)  # Actual dollar PnL
+        exit_value = self.entry_value + pnl
         duration_days = (date - self.entry_date).days
         
         # Complete current trade
@@ -199,8 +200,8 @@ class PositionManager:
             return {}
         
         total_trades = len(completed_trades)
-        winning_trades = len([t for t in completed_trades if t['pnl'] > 0])
-        losing_trades = len([t for t in completed_trades if t['pnl'] < 0])
+        winning_trades = len([t for t in completed_trades if t['pnl_pct'] > 0])
+        losing_trades = len([t for t in completed_trades if t['pnl_pct'] < 0])
         win_rate = winning_trades / total_trades * 100
         
         total_pnl = sum(t['pnl'] for t in completed_trades)
@@ -240,7 +241,7 @@ class GaussianChannelStrategy(bt.Strategy):
         ('position_size_pct', 1.0),      # Position size as percentage of portfolio (100%)
         ('atr_period', 14),              # ATR calculation period (needed for channel calculation)
         ('stop_loss_pct', 0.05),         # Stop loss percentage (5%)
-        ('enable_stop_loss', True),      # Enable/disable stop loss
+        ('enable_stop_loss', False),     # Disable stop loss by default
     )
     
     def __init__(self):
