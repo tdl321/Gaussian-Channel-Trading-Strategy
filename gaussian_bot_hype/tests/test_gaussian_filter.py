@@ -19,7 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from strategy.gaussian_filter import GaussianChannelFilter
 from strategy.signals import SignalGenerator
-from strategy.backtest import run_backtrader_backtest, analyze_backtrader_results, plot_backtrader_results
+from strategy.backtest import run_backtrader_backtest, analyze_backtrader_results, plot_backtrader_results, run_comprehensive_backtest
 
 
 
@@ -571,71 +571,65 @@ def compare_parameters():
 
 
 def run_backtest_with_debug():
-    """Run backtest with debug mode enabled"""
+    """Run comprehensive backtest with position management"""
     
-    print("🔍 Starting Gaussian Channel Backtest with Debug Mode")
+    print("🔍 Starting Comprehensive Gaussian Channel Backtest")
     print("=" * 60)
     
-    # Load data
+    # Data path
     data_path = "data/btc_1d_data_2018_to_2025.csv"
     print(f"📊 Loading data from: {data_path}")
     
+    # Run comprehensive backtest
     try:
-        data = pd.read_csv(data_path)
-        data['Date'] = pd.to_datetime(data['Date'])
-        data.set_index('Date', inplace=True)
-        print(f"✅ Loaded {len(data)} bars from {data.index[0].date()} to {data.index[-1].date()}")
-    except Exception as e:
-        print(f"❌ Error loading data: {e}")
-        return
-    
-    # Strategy parameters (matching live trading)
-    strategy_params = {
-        'poles': 6,
-        'period': 144,
-        'multiplier': 1.414,
-        'position_size_pct': 1.0,
-        'atr_period': 14
-    }
-    
-    print(f"⚙️ Strategy parameters: {strategy_params}")
-    print("=" * 60)
-    
-    # Run backtest with debug mode
-    try:
-        cerebro = run_backtrader_backtest(
-            data=data,
-            strategy_class=None,  # Will use default GaussianChannelStrategy
-            strategy_params=strategy_params,
+        results = run_comprehensive_backtest(
+            data_path=data_path,
             initial_cash=10000,
             commission=0.001,
             slippage_perc=0.01,
-            debug_mode=True  # Enable debug mode
+            debug_mode=True,  # Enable debug mode
+            save_results=True
         )
         
-        print("=" * 60)
-        print("📈 Analyzing results...")
-        
-        # Analyze results
-        results = analyze_backtrader_results(cerebro)
-        
-        print(f"💰 Initial Cash: ${results['initial_cash']:,.2f}")
-        print(f"💰 Final Value: ${results['final_value']:,.2f}")
-        print(f"📊 Total Return: {results['total_return_pct']:.2f}%")
-        
-        # Get strategy instance for additional info
-        strategy = results.get('strategy')
-        if strategy:
-            print(f"🔄 Total Entries: {strategy.entry_count}")
-            print(f"📊 Total Bars Processed: {len(strategy.hlc3_history) if hasattr(strategy, 'hlc3_history') else 'Unknown'}")
-        
-        print("=" * 60)
-        print("✅ Backtest completed successfully!")
-        
-        # Ask if user wants to plot
-        plot_choice = input("📊 Would you like to see the plot? (y/n): ").lower().strip()
-        if plot_choice in ['y', 'yes']:
-            plot_backtrader_results(cerebro)
+        if results and results['success']:
+            print("=" * 60)
+            print("✅ Comprehensive backtest completed successfully!")
+            
+            # Ask if user wants to see additional analysis
+            analysis_choice = input("📊 Would you like to see detailed trade analysis? (y/n): ").lower().strip()
+            if analysis_choice in ['y', 'yes']:
+                cerebro = results['cerebro']
+                strategy = None
+                try:
+                    if hasattr(cerebro, 'runstrats') and cerebro.runstrats:
+                        strategy_list = cerebro.runstrats[0]
+                        if isinstance(strategy_list, list) and len(strategy_list) > 0:
+                            strategy = strategy_list[0]
+                except Exception as e:
+                    print(f"Warning: Could not retrieve strategy instance: {e}")
+                
+                if strategy and hasattr(strategy, 'position_manager'):
+                    print("\n📋 DETAILED TRADE ANALYSIS:")
+                    print("=" * 60)
+                    
+                    # Show recent trades
+                    recent_trades = strategy.position_manager.trades[-10:]  # Last 10 trades
+                    if recent_trades:
+                        print("Recent Trades:")
+                        for i, trade in enumerate(recent_trades, 1):
+                            status = trade.get('status', 'UNKNOWN')
+                            if status == 'COMPLETED':
+                                print(f"  {i}. {trade['entry_date']} → {trade['exit_date']} | "
+                                      f"${trade['entry_price']:.2f} → ${trade['exit_price']:.2f} | "
+                                      f"{trade['pnl_pct']:+.2f}% | {trade['duration_days']} days")
+                            else:
+                                print(f"  {i}. {trade['entry_date']} → OPEN | "
+                                      f"${trade['entry_price']:.2f} → CURRENT | "
+                                      f"OPEN | {trade.get('duration_days', 0)} days")
+        else:
+            print("❌ Backtest failed!")
+            if results:
+                print(f"Error: {results.get('error', 'Unknown error')}")
         
     except Exception as e:
         print(f"❌ Error during backtest: {e}")

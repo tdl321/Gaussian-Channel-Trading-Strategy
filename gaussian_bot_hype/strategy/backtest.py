@@ -23,6 +23,202 @@ from .gaussian_filter import GaussianChannelFilter, calculate_rma
 from .signals import SignalGenerator
 
 
+class PositionManager:
+    """
+    Position management system for backtesting
+    Handles position state, leverage, risk management, and trade tracking
+    """
+    
+    def __init__(self, leverage=5, max_position_size=1.0, stop_loss_pct=0.05):
+        """
+        Initialize position manager
+        
+        Args:
+            leverage: Leverage multiplier (from config)
+            max_position_size: Maximum position size as fraction of portfolio
+            stop_loss_pct: Stop loss percentage (optional)
+        """
+        self.leverage = leverage
+        self.max_position_size = max_position_size
+        self.stop_loss_pct = stop_loss_pct
+        
+        # Position state
+        self.in_position = False
+        self.entry_price = None
+        self.entry_date = None
+        self.position_size = 0.0
+        self.entry_value = 0.0
+        
+        # Trade tracking
+        self.trades = []
+        self.current_trade = None
+        
+        # Risk management
+        self.max_drawdown = 0.0
+        self.peak_value = 0.0
+        
+    def can_enter(self, current_price, portfolio_value):
+        """
+        Check if we can enter a new position
+        
+        Args:
+            current_price: Current asset price
+            portfolio_value: Current portfolio value
+            
+        Returns:
+            bool: True if can enter, False otherwise
+        """
+        if self.in_position:
+            return False
+        
+        # Check if we have enough capital
+        required_margin = (current_price * self.max_position_size) / self.leverage
+        return portfolio_value >= required_margin
+    
+    def can_exit(self):
+        """Check if we can exit current position"""
+        return self.in_position
+    
+    def enter_position(self, price, date, portfolio_value):
+        """
+        Enter a new position
+        
+        Args:
+            price: Entry price
+            date: Entry date
+            portfolio_value: Portfolio value at entry
+        """
+        if self.in_position:
+            return False
+        
+        # Calculate position size with leverage
+        position_value = portfolio_value * self.max_position_size
+        self.position_size = (position_value * self.leverage) / price
+        self.entry_price = price
+        self.entry_date = date
+        self.entry_value = position_value
+        self.in_position = True
+        
+        # Start tracking current trade
+        self.current_trade = {
+            'entry_date': date,
+            'entry_price': price,
+            'entry_value': position_value,
+            'position_size': self.position_size,
+            'leverage': self.leverage,
+            'exit_date': None,
+            'exit_price': None,
+            'exit_value': None,
+            'pnl': 0.0,
+            'pnl_pct': 0.0,
+            'duration_days': 0,
+            'status': 'OPEN'
+        }
+        
+        return True
+    
+    def exit_position(self, price, date):
+        """
+        Exit current position
+        
+        Args:
+            price: Exit price
+            date: Exit date
+            
+        Returns:
+            dict: Trade result or None if no position
+        """
+        if not self.in_position:
+            return None
+        
+        # Calculate exit values
+        exit_value = self.position_size * price
+        pnl = exit_value - self.entry_value
+        pnl_pct = (pnl / self.entry_value) * 100
+        duration_days = (date - self.entry_date).days
+        
+        # Complete current trade
+        if self.current_trade:
+            self.current_trade.update({
+                'exit_date': date,
+                'exit_price': price,
+                'exit_value': exit_value,
+                'pnl': pnl,
+                'pnl_pct': pnl_pct,
+                'duration_days': duration_days,
+                'status': 'COMPLETED'
+            })
+            self.trades.append(self.current_trade)
+        
+        # Reset position state
+        self.in_position = False
+        self.entry_price = None
+        self.entry_date = None
+        self.position_size = 0.0
+        self.entry_value = 0.0
+        
+        trade_result = self.current_trade.copy()
+        self.current_trade = None
+        
+        return trade_result
+    
+    def check_stop_loss(self, current_price):
+        """
+        Check if stop loss has been hit
+        
+        Args:
+            current_price: Current asset price
+            
+        Returns:
+            bool: True if stop loss hit, False otherwise
+        """
+        if not self.in_position or not self.stop_loss_pct:
+            return False
+        
+        loss_pct = (self.entry_price - current_price) / self.entry_price
+        return loss_pct >= self.stop_loss_pct
+    
+    def get_position_info(self):
+        """Get current position information"""
+        return {
+            'in_position': self.in_position,
+            'entry_price': self.entry_price,
+            'entry_date': self.entry_date,
+            'position_size': self.position_size,
+            'entry_value': self.entry_value,
+            'leverage': self.leverage
+        }
+    
+    def get_trade_statistics(self):
+        """Get trade statistics"""
+        if not self.trades:
+            return {}
+        
+        completed_trades = [t for t in self.trades if t['status'] == 'COMPLETED']
+        if not completed_trades:
+            return {}
+        
+        total_trades = len(completed_trades)
+        winning_trades = len([t for t in completed_trades if t['pnl'] > 0])
+        losing_trades = len([t for t in completed_trades if t['pnl'] < 0])
+        win_rate = winning_trades / total_trades * 100
+        
+        total_pnl = sum(t['pnl'] for t in completed_trades)
+        avg_pnl = total_pnl / total_trades
+        avg_duration = sum(t['duration_days'] for t in completed_trades) / total_trades
+        
+        return {
+            'total_trades': total_trades,
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'win_rate': win_rate,
+            'total_pnl': total_pnl,
+            'avg_pnl': avg_pnl,
+            'avg_duration': avg_duration,
+            'open_trades': 1 if self.in_position else 0
+        }
+
+
 class GaussianChannelStrategy(bt.Strategy):
     """
     Gaussian Channel Strategy implemented as a backtrader strategy
@@ -31,7 +227,8 @@ class GaussianChannelStrategy(bt.Strategy):
     - Long-only trend following (matches live trading exactly)
     - Dynamic exit based on price closing below upper band
     - 6 poles, 144 period, 1.414 multiplier (matches live trading)
-    - No pyramiding or ATR spacing (simplified)
+    - Proper position management with leverage
+    - Risk management and trade tracking
     - 100% position size per trade
     """
     
@@ -39,8 +236,11 @@ class GaussianChannelStrategy(bt.Strategy):
         ('poles', 6),                    # Number of poles for Gaussian filter (matches live trading)
         ('period', 144),                 # Sampling period for Gaussian filter
         ('multiplier', 1.414),           # Band width multiplier
+        ('leverage', 5),                 # Leverage multiplier (from config)
         ('position_size_pct', 1.0),      # Position size as percentage of portfolio (100%)
         ('atr_period', 14),              # ATR calculation period (needed for channel calculation)
+        ('stop_loss_pct', 0.05),         # Stop loss percentage (5%)
+        ('enable_stop_loss', True),      # Enable/disable stop loss
     )
     
     def __init__(self):
@@ -60,9 +260,16 @@ class GaussianChannelStrategy(bt.Strategy):
         }
         self.signal_generator = SignalGenerator(self.gaussian_filter, config_params)
         
-        # Strategy state variables (EXACT same as live trading)
+        # Initialize position manager
+        self.position_manager = PositionManager(
+            leverage=self.params.leverage,
+            max_position_size=self.params.position_size_pct,
+            stop_loss_pct=self.params.stop_loss_pct if self.params.enable_stop_loss else None
+        )
+        
+        # Strategy state variables
         self.entry_count = 0
-        self.last_entry_price = None
+        self.exit_count = 0
         
         # Store all historical data for signal generation (EXACT same as live trading)
         self.data_history = []
@@ -75,10 +282,11 @@ class GaussianChannelStrategy(bt.Strategy):
         This method implements the EXACT same logic as live trading using SignalGenerator:
         1. Prepare current bar data
         2. Use SignalGenerator to generate signals (EXACT same as live trading)
-        3. Execute trades based on signals
+        3. Execute trades based on signals with position management
         """
         # Get current bar data (EXACT same format as live trading)
         current_date = self.datas[0].datetime.date(0)
+        current_price = self.data.close[0]
         current_bar = {
             'Date': current_date,
             'Open': self.data.open[0],
@@ -94,7 +302,6 @@ class GaussianChannelStrategy(bt.Strategy):
         # Skip if not enough data for Gaussian filter (need period + buffer)
         min_required = self.params.period + 25
         if len(self.data_history) < min_required:
-            self.log(f'Waiting for enough data: {len(self.data_history)}/{min_required}')
             return
         
         # Convert history to DataFrame (EXACT same as live trading)
@@ -110,7 +317,6 @@ class GaussianChannelStrategy(bt.Strategy):
         exit_signal = df_with_signals['exit_signal'].iloc[current_index]
         
         # Get current values for logging
-        current_close = self.data.close[0]
         current_hband = df_with_signals['hband_current'].iloc[current_index]
         current_filt = df_with_signals['filt_current'].iloc[current_index]
         
@@ -118,23 +324,44 @@ class GaussianChannelStrategy(bt.Strategy):
         if np.isnan(current_filt) or np.isnan(current_hband):
             return
         
-        # === DIAGNOSTIC LOGGING (Every bar for complete visibility) ===
-        self.log(
-            f'Close={current_close:.2f}, Filt={current_filt:.2f}, '
-            f'HBand={current_hband:.2f}, Entry={"YES" if entry_signal else "NO"}, Exit={"YES" if exit_signal else "NO"}'
-        )
+        # Get current portfolio value
+        portfolio_value = self.broker.getvalue()
         
-        # === TRADING LOGIC (EXACT same as live trading) ===
-        if not self.position:
-            if entry_signal:
-                size = self.broker.getcash() * self.params.position_size_pct / current_close
-                self.buy(size=size)
+        # === POSITION MANAGEMENT LOGIC ===
+        
+        # Check stop loss first (if enabled)
+        if self.params.enable_stop_loss and self.position_manager.check_stop_loss(current_price):
+            if self.position_manager.can_exit():
+                trade_result = self.position_manager.exit_position(current_price, current_date)
+                if trade_result:
+                    self.close()  # Close all positions
+                    self.exit_count += 1
+                    self.log(f'STOP LOSS EXIT: {current_date} at ${current_price:.2f} | PnL: {trade_result["pnl_pct"]:+.2f}%')
+        
+        # Check exit signal
+        elif exit_signal and self.position_manager.can_exit():
+            trade_result = self.position_manager.exit_position(current_price, current_date)
+            if trade_result:
+                self.close()  # Close all positions
+                self.exit_count += 1
+                self.log(f'EXIT SIGNAL: {current_date} at ${current_price:.2f} | PnL: {trade_result["pnl_pct"]:+.2f}% | Duration: {trade_result["duration_days"]} days')
+        
+        # Check entry signal
+        elif entry_signal and self.position_manager.can_enter(current_price, portfolio_value):
+            if self.position_manager.enter_position(current_price, current_date, portfolio_value):
+                # Calculate position size for backtrader
+                position_size = self.position_manager.position_size
+                self.buy(size=position_size)
                 self.entry_count += 1
-                self.last_entry_price = current_close
-        else:
-            if exit_signal:
-                self.close()
-                self.last_entry_price = None
+                self.log(f'ENTRY SIGNAL: {current_date} at ${current_price:.2f} | Size: {position_size:.4f} | Leverage: {self.params.leverage}x')
+        
+        # === DIAGNOSTIC LOGGING (Every 100 bars for visibility) ===
+        if len(self.data_history) % 100 == 0:
+            position_info = self.position_manager.get_position_info()
+            self.log(
+                f'Portfolio=${portfolio_value:.2f}, Close=${current_price:.2f}, '
+                f'InPosition={position_info["in_position"]}, Entry={entry_signal}, Exit={exit_signal}'
+            )
     
     def log(self, txt, dt=None):
         dt = dt or self.datas[0].datetime.date(0)
@@ -150,6 +377,23 @@ class GaussianChannelStrategy(bt.Strategy):
     def notify_trade(self, trade):
         if trade.isclosed:
             self.log(f'TRADE CLOSED: Gross PnL: {trade.pnl:.2f}, Net PnL: {trade.pnlcomm:.2f}')
+    
+    def stop(self):
+        """Called when strategy stops - print final statistics"""
+        stats = self.position_manager.get_trade_statistics()
+        if stats:
+            print("\n" + "="*60)
+            print("📊 FINAL TRADE STATISTICS")
+            print("="*60)
+            print(f"Total Trades: {stats['total_trades']}")
+            print(f"Winning Trades: {stats['winning_trades']}")
+            print(f"Losing Trades: {stats['losing_trades']}")
+            print(f"Win Rate: {stats['win_rate']:.1f}%")
+            print(f"Total PnL: ${stats['total_pnl']:,.2f}")
+            print(f"Average PnL per Trade: ${stats['avg_pnl']:,.2f}")
+            print(f"Average Duration: {stats['avg_duration']:.1f} days")
+            print(f"Open Positions: {stats['open_trades']}")
+            print("="*60)
 
 
 def create_backtrader_datafeed(data, datetime_col='Date'):
@@ -194,20 +438,21 @@ def create_backtrader_datafeed(data, datetime_col='Date'):
     return datafeed
 
 
-def run_backtrader_backtest(data, strategy_class, strategy_params=None, 
+def run_backtrader_backtest(data, strategy_class=None, strategy_params=None, 
                           initial_cash=10000, commission=0.001, 
-                          slippage_perc=0.01, margin=0.2, debug_mode=False):
+                          slippage_perc=0.01, debug_mode=False, use_config=True):
     """
-    Run backtest using backtrader
+    Run backtest using backtrader with position management
     
     Args:
         data: DataFrame with OHLCV data
-        strategy_class: Backtrader strategy class
+        strategy_class: Backtrader strategy class (default: GaussianChannelStrategy)
         strategy_params: Strategy parameters dict
         initial_cash: Initial capital
         commission: Commission percentage
         slippage_perc: Slippage percentage
-        margin: Margin requirement
+        debug_mode: Enable debug mode (reduces logging)
+        use_config: Use config.py parameters for strategy settings
         
     Returns:
         backtrader.Cerebro instance with results
@@ -238,6 +483,30 @@ def run_backtrader_backtest(data, strategy_class, strategy_params=None,
     
     # Note: set_margin is not available in standard backtrader
     # Margin handling is done at the strategy level
+    
+    # Load config parameters if requested
+    if use_config:
+        try:
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            from config import POLES, PERIOD, MULTIPLIER, LEVERAGE
+            
+            # Override strategy params with config values
+            if strategy_params is None:
+                strategy_params = {}
+            
+            strategy_params.update({
+                'poles': POLES,
+                'period': PERIOD,
+                'multiplier': MULTIPLIER,
+                'leverage': LEVERAGE
+            })
+            
+            print(f"✅ Loaded config parameters: Poles={POLES}, Period={PERIOD}, Multiplier={MULTIPLIER}, Leverage={LEVERAGE}x")
+        except Exception as e:
+            print(f"⚠️  Could not load config parameters: {e}")
+            print("   Using default strategy parameters")
     
     # Add strategy with error checking
     try:
@@ -318,3 +587,260 @@ def plot_backtrader_results(cerebro, save_path=None):
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     
     plt.show() 
+
+
+def create_backtest_report(cerebro, save_report=True, report_title="Gaussian Channel Backtest Report"):
+    """
+    Create comprehensive backtest report with trade analysis
+    
+    Args:
+        cerebro: Backtrader Cerebro instance with results
+        save_report: Save report to file
+        report_title: Title for the report
+        
+    Returns:
+        dict: Report data
+    """
+    print(f"\n📊 Creating {report_title}...")
+    
+    # Get basic metrics
+    final_value = cerebro.broker.getvalue()
+    initial_value = cerebro.broker.startingcash
+    total_return = (final_value - initial_value) / initial_value
+    
+    # Get strategy instance for detailed analysis
+    strategy = None
+    try:
+        if hasattr(cerebro, 'runstrats') and cerebro.runstrats:
+            strategy_list = cerebro.runstrats[0]
+            if isinstance(strategy_list, list) and len(strategy_list) > 0:
+                strategy = strategy_list[0]
+        elif hasattr(cerebro, 'strategy') and cerebro.strategy:
+            strategy = cerebro.strategy
+        elif hasattr(cerebro, '_strategy') and cerebro._strategy:
+            strategy = cerebro._strategy
+    except Exception as e:
+        print(f"Warning: Could not retrieve strategy instance: {e}")
+        strategy = None
+    
+    # Get position manager statistics if available
+    position_stats = {}
+    if strategy and hasattr(strategy, 'position_manager'):
+        position_stats = strategy.position_manager.get_trade_statistics()
+    
+    # Create report data
+    report_data = {
+        'title': report_title,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'initial_cash': initial_value,
+        'final_value': final_value,
+        'total_return': total_return,
+        'total_return_pct': total_return * 100,
+        'position_stats': position_stats,
+        'strategy_params': {}
+    }
+    
+    # Add strategy parameters if available
+    if strategy:
+        report_data['strategy_params'] = {
+            'poles': getattr(strategy.params, 'poles', 'N/A'),
+            'period': getattr(strategy.params, 'period', 'N/A'),
+            'multiplier': getattr(strategy.params, 'multiplier', 'N/A'),
+            'leverage': getattr(strategy.params, 'leverage', 'N/A'),
+            'stop_loss_pct': getattr(strategy.params, 'stop_loss_pct', 'N/A'),
+            'enable_stop_loss': getattr(strategy.params, 'enable_stop_loss', 'N/A')
+        }
+    
+    # Print report
+    print("\n" + "="*80)
+    print(f"📊 {report_title}")
+    print("="*80)
+    print(f"Report Generated: {report_data['timestamp']}")
+    print()
+    
+    print("💰 PORTFOLIO PERFORMANCE:")
+    print(f"   Initial Capital: ${initial_value:,.2f}")
+    print(f"   Final Value: ${final_value:,.2f}")
+    print(f"   Total Return: {total_return*100:+.2f}%")
+    print(f"   Absolute PnL: ${final_value - initial_value:+,.2f}")
+    print()
+    
+    if strategy_params := report_data['strategy_params']:
+        print("⚙️ STRATEGY PARAMETERS:")
+        print(f"   Poles: {strategy_params['poles']}")
+        print(f"   Period: {strategy_params['period']}")
+        print(f"   Multiplier: {strategy_params['multiplier']}")
+        print(f"   Leverage: {strategy_params['leverage']}x")
+        print(f"   Stop Loss: {strategy_params['stop_loss_pct']*100}%" if strategy_params['stop_loss_pct'] != 'N/A' else "   Stop Loss: Disabled")
+        print()
+    
+    if position_stats:
+        print("📈 TRADE STATISTICS:")
+        print(f"   Total Trades: {position_stats['total_trades']}")
+        print(f"   Winning Trades: {position_stats['winning_trades']}")
+        print(f"   Losing Trades: {position_stats['losing_trades']}")
+        print(f"   Win Rate: {position_stats['win_rate']:.1f}%")
+        print(f"   Total PnL: ${position_stats['total_pnl']:+,.2f}")
+        print(f"   Average PnL per Trade: ${position_stats['avg_pnl']:+,.2f}")
+        print(f"   Average Duration: {position_stats['avg_duration']:.1f} days")
+        print(f"   Open Positions: {position_stats['open_trades']}")
+        print()
+        
+        # Calculate additional metrics
+        if position_stats['total_trades'] > 0:
+            profit_factor = abs(sum(t['pnl'] for t in strategy.position_manager.trades if t['pnl'] > 0) / 
+                              sum(t['pnl'] for t in strategy.position_manager.trades if t['pnl'] < 0)) if sum(t['pnl'] for t in strategy.position_manager.trades if t['pnl'] < 0) != 0 else float('inf')
+            print(f"   Profit Factor: {profit_factor:.2f}")
+            
+            # Calculate max drawdown from trades
+            cumulative_pnl = 0
+            peak_pnl = 0
+            max_drawdown = 0
+            for trade in strategy.position_manager.trades:
+                cumulative_pnl += trade['pnl']
+                if cumulative_pnl > peak_pnl:
+                    peak_pnl = cumulative_pnl
+                drawdown = peak_pnl - cumulative_pnl
+                if drawdown > max_drawdown:
+                    max_drawdown = drawdown
+            
+            print(f"   Max Drawdown: ${max_drawdown:,.2f}")
+    
+    print("="*80)
+    
+    # Save report if requested
+    if save_report:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"backtest_report_{timestamp}.txt"
+        save_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results', filename)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        with open(save_path, 'w') as f:
+            f.write(f"{report_title}\n")
+            f.write("="*80 + "\n")
+            f.write(f"Report Generated: {report_data['timestamp']}\n\n")
+            
+            f.write("PORTFOLIO PERFORMANCE:\n")
+            f.write(f"Initial Capital: ${initial_value:,.2f}\n")
+            f.write(f"Final Value: ${final_value:,.2f}\n")
+            f.write(f"Total Return: {total_return*100:+.2f}%\n")
+            f.write(f"Absolute PnL: ${final_value - initial_value:+,.2f}\n\n")
+            
+            if position_stats:
+                f.write("TRADE STATISTICS:\n")
+                f.write(f"Total Trades: {position_stats['total_trades']}\n")
+                f.write(f"Winning Trades: {position_stats['winning_trades']}\n")
+                f.write(f"Losing Trades: {position_stats['losing_trades']}\n")
+                f.write(f"Win Rate: {position_stats['win_rate']:.1f}%\n")
+                f.write(f"Total PnL: ${position_stats['total_pnl']:+,.2f}\n")
+                f.write(f"Average PnL per Trade: ${position_stats['avg_pnl']:+,.2f}\n")
+                f.write(f"Average Duration: {position_stats['avg_duration']:.1f} days\n")
+                f.write(f"Open Positions: {position_stats['open_trades']}\n\n")
+        
+        print(f"📄 Report saved to: {save_path}")
+    
+    return report_data
+
+
+def run_comprehensive_backtest(data_path, initial_cash=10000, commission=0.001, 
+                             slippage_perc=0.01, debug_mode=False, save_results=True):
+    """
+    Run comprehensive backtest with full analysis and reporting
+    
+    Args:
+        data_path: Path to CSV data file
+        initial_cash: Initial capital
+        commission: Commission percentage
+        slippage_perc: Slippage percentage
+        debug_mode: Enable debug mode
+        save_results: Save results and reports
+        
+    Returns:
+        dict: Complete backtest results
+    """
+    print("🚀 Starting Comprehensive Gaussian Channel Backtest")
+    print("="*60)
+    
+    # Load data
+    try:
+        data = pd.read_csv(data_path)
+        
+        # Handle different date column names
+        if 'Date' in data.columns:
+            date_col = 'Date'
+        elif 'Open time' in data.columns:
+            date_col = 'Open time'
+        else:
+            # Try to find any datetime-like column
+            datetime_cols = [col for col in data.columns if 'time' in col.lower() or 'date' in col.lower()]
+            if datetime_cols:
+                date_col = datetime_cols[0]
+            else:
+                raise ValueError("No date/time column found in data")
+        
+        data[date_col] = pd.to_datetime(data[date_col])
+        data.set_index(date_col, inplace=True)
+        
+        # Ensure required columns exist
+        required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        missing_columns = [col for col in required_columns if col not in data.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        print(f"✅ Loaded {len(data)} bars from {data.index[0].date()} to {data.index[-1].date()}")
+        print(f"   Date column: {date_col}")
+        print(f"   Available columns: {list(data.columns)}")
+        
+    except Exception as e:
+        print(f"❌ Error loading data: {e}")
+        return None
+    
+    # Run backtest
+    try:
+        cerebro = run_backtrader_backtest(
+            data=data,
+            strategy_class=None,  # Use default GaussianChannelStrategy
+            strategy_params=None,  # Use config parameters
+            initial_cash=initial_cash,
+            commission=commission,
+            slippage_perc=slippage_perc,
+            debug_mode=debug_mode,
+            use_config=True  # Use config.py parameters
+        )
+        
+        print("✅ Backtest completed successfully!")
+        
+        # Create comprehensive report
+        report_data = create_backtest_report(
+            cerebro, 
+            save_report=save_results,
+            report_title="Gaussian Channel Comprehensive Backtest Report"
+        )
+        
+        # Plot results if matplotlib is available
+        try:
+            if save_results:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                plot_filename = f"backtest_plot_{timestamp}.png"
+                plot_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results', plot_filename)
+                os.makedirs(os.path.dirname(plot_path), exist_ok=True)
+                
+                print(f"📊 Generating plot...")
+                plot_backtrader_results(cerebro, save_path=plot_path)
+                print(f"📊 Plot saved to: {plot_path}")
+            else:
+                plot_backtrader_results(cerebro)
+        except Exception as e:
+            print(f"⚠️  Could not generate plot: {e}")
+        
+        return {
+            'cerebro': cerebro,
+            'report_data': report_data,
+            'success': True
+        }
+        
+    except Exception as e:
+        print(f"❌ Error during backtest: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'error': str(e)} 
