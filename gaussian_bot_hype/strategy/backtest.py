@@ -345,7 +345,14 @@ class GaussianChannelStrategy(bt.Strategy):
             if trade_result:
                 self.close()  # Close all positions
                 self.exit_count += 1
-                self.log(f'EXIT SIGNAL: {current_date} at ${current_price:.2f} | PnL: {trade_result["pnl_pct"]:+.2f}% | Duration: {trade_result["duration_days"]} days')
+                
+                # Update broker cash with actual PnL from the trade
+                actual_pnl = trade_result['pnl']
+                current_cash = self.broker.getcash()
+                new_cash = current_cash + actual_pnl
+                self.broker.setcash(new_cash)
+                
+                self.log(f'EXIT SIGNAL: {current_date} at ${current_price:.2f} | PnL: {trade_result["pnl_pct"]:+.2f}% | Duration: {trade_result["duration_days"]} days | Portfolio: ${self.broker.getvalue():.2f}')
         
         # Check entry signal
         elif entry_signal and self.position_manager.can_enter(current_price, portfolio_value):
@@ -354,7 +361,7 @@ class GaussianChannelStrategy(bt.Strategy):
                 position_size = self.position_manager.position_size
                 self.buy(size=position_size)
                 self.entry_count += 1
-                self.log(f'ENTRY SIGNAL: {current_date} at ${current_price:.2f} | Size: {position_size:.4f} | Leverage: {self.params.leverage}x')
+                self.log(f'ENTRY SIGNAL: {current_date} at ${current_price:.2f} | Size: {position_size:.4f} | Leverage: {self.params.leverage}x | Portfolio: ${portfolio_value:.2f}')
         
         # === DIAGNOSTIC LOGGING (Every 100 bars for visibility) ===
         if len(self.data_history) % 100 == 0:
@@ -383,9 +390,16 @@ class GaussianChannelStrategy(bt.Strategy):
         """Called when strategy stops - print final statistics"""
         stats = self.position_manager.get_trade_statistics()
         if stats:
+            final_portfolio = self.broker.getvalue()
+            initial_portfolio = self.broker.startingcash
+            total_return = (final_portfolio - initial_portfolio) / initial_portfolio * 100
+            
             print("\n" + "="*60)
             print("📊 FINAL TRADE STATISTICS")
             print("="*60)
+            print(f"Initial Portfolio: ${initial_portfolio:,.2f}")
+            print(f"Final Portfolio: ${final_portfolio:,.2f}")
+            print(f"Total Return: {total_return:+.2f}%")
             print(f"Total Trades: {stats['total_trades']}")
             print(f"Winning Trades: {stats['winning_trades']}")
             print(f"Losing Trades: {stats['losing_trades']}")
