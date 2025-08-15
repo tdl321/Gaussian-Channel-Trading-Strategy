@@ -219,7 +219,7 @@ class SignalGenerator:
         # Entry condition: entry signal and no current position
         if entry_signal and self.current_position_size == 0:
             # Update position state
-            self.current_position_size = 1.0  # Full position
+            self.current_position_size = 0.99  # Full position
             self.position_entry_price = current_price
             self.position_entry_date = current_date
             

@@ -1,0 +1,122 @@
+//@version=6
+strategy(title="ALT Gaussian Channel Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100, pyramiding=0, commission_type=strategy.commission.percent, commission_value=0.01, slippage=3, calc_on_every_tick=false, fill_orders_on_standard_ohlc=true)
+
+// === INPUTS ===
+// Channel Controls - OPTIMIZED FOR ALTCOINS
+src = input(hlc3, title="Source")
+N = input.int(3, title="Poles (Lower = Faster)", minval=1, maxval=9)  // Optimized for speed
+per = input.int(144, title="Sampling Period", minval=2)
+mult = input.float(2.0, title="Filtered True Range Multiplier (Wider = More Tolerant)", minval=0)  // Wider channel for altcoins
+
+
+
+// === VARIABLES ===
+atr = ta.atr(7)  // Fast 7-day ATR for altcoins
+
+// === GAUSSIAN CHANNEL FUNCTIONS ===
+// Filter function
+f_filt9x(_a, _s, _i) => 
+    var int _m2 = 0, var int _m3 = 0, var int _m4 = 0, var int _m5 = 0, var int _m6 = 0
+    var int _m7 = 0, var int _m8 = 0, var int _m9 = 0, var float _f = 0.0
+    _x = (1 - _a)
+    // Weights. 
+    // Initial weight _m1 is a pole number and equal to _i
+    _m2 := _i == 9 ? 36  : _i == 8 ? 28 : _i == 7 ? 21 : _i == 6 ? 15 : _i == 5 ? 10 : _i == 4 ? 6 : _i == 3 ? 3 : _i == 2 ? 1 : 0
+    _m3 := _i == 9 ? 84  : _i == 8 ? 56 : _i == 7 ? 35 : _i == 6 ? 20 : _i == 5 ? 10 : _i == 4 ? 4 : _i == 3 ? 1 : 0
+    _m4 := _i == 9 ? 126 : _i == 8 ? 70 : _i == 7 ? 35 : _i == 6 ? 15 : _i == 5 ? 5  : _i == 4 ? 1 : 0
+    _m5 := _i == 9 ? 126 : _i == 8 ? 56 : _i == 7 ? 21 : _i == 6 ? 6  : _i == 5 ? 1  : 0 
+    _m6 := _i == 9 ? 84  : _i == 8 ? 28 : _i == 7 ? 7  : _i == 6 ? 1  : 0 
+    _m7 := _i == 9 ? 36  : _i == 8 ? 8  : _i == 7 ? 1  : 0 
+    _m8 := _i == 9 ? 9   : _i == 8 ? 1  : 0 
+    _m9 := _i == 9 ? 1   : 0
+    // filter
+    _f :=   math.pow(_a, _i) * nz(_s) + 
+      _i  *     _x      * nz(_f[1])      - (_i >= 2 ? 
+      _m2 * math.pow(_x, 2)  * nz(_f[2]) : 0) + (_i >= 3 ? 
+      _m3 * math.pow(_x, 3)  * nz(_f[3]) : 0) - (_i >= 4 ? 
+      _m4 * math.pow(_x, 4)  * nz(_f[4]) : 0) + (_i >= 5 ? 
+      _m5 * math.pow(_x, 5)  * nz(_f[5]) : 0) - (_i >= 6 ? 
+      _m6 * math.pow(_x, 6)  * nz(_f[6]) : 0) + (_i >= 7 ? 
+      _m7 * math.pow(_x, 7)  * nz(_f[7]) : 0) - (_i >= 8 ? 
+      _m8 * math.pow(_x, 8)  * nz(_f[8]) : 0) + (_i == 9 ? 
+      _m9 * math.pow(_x, 9)  * nz(_f[9]) : 0)
+
+// 9 var declaration fun
+f_pole(_a, _s, _i) =>
+    _f1 =            f_filt9x(_a, _s, 1)
+    _f2 = (_i >= 2 ? f_filt9x(_a, _s, 2) : 0)
+    _f3 = (_i >= 3 ? f_filt9x(_a, _s, 3) : 0)
+    _f4 = (_i >= 4 ? f_filt9x(_a, _s, 4) : 0)
+    _f5 = (_i >= 5 ? f_filt9x(_a, _s, 5) : 0)
+    _f6 = (_i >= 6 ? f_filt9x(_a, _s, 6) : 0)
+    _f7 = (_i >= 7 ? f_filt9x(_a, _s, 7) : 0)
+    _f8 = (_i >= 8 ? f_filt9x(_a, _s, 8) : 0)
+    _f9 = (_i == 9 ? f_filt9x(_a, _s, 9) : 0)
+    _fn = _i == 1 ? _f1 : _i == 2 ? _f2 : _i == 3 ? _f3 :
+      _i == 4     ? _f4 : _i == 5 ? _f5 : _i == 6 ? _f6 :
+      _i == 7     ? _f7 : _i == 8 ? _f8 : _i == 9 ? _f9 : na
+    [_fn, _f1]
+
+// === GAUSSIAN CHANNEL CALCULATIONS ===
+// Beta and Alpha Components
+beta  = (1 - math.cos(4*math.asin(1)/per)) / (math.pow(1.414, 2/N) - 1)
+alpha = - beta + math.sqrt(math.pow(beta, 2) + 2*beta)
+
+// Data - Use current bar for immediate response
+srcdata = hlc3  // Current bar's hlc3
+trdata  = ta.tr(true)  // Current bar's true range
+
+// Filtered Values
+[filtn, filt1]     = f_pole(alpha, srcdata, N)
+[filtntr, filt1tr] = f_pole(alpha, trdata,  N)
+
+// Filter values
+filt   = filtn
+filttr = filtntr
+
+// Bands
+hband = filt + filttr*mult
+lband = filt - filttr*mult
+
+// === GREEN CHANNEL CONDITION ===
+// Define "green channel" when filter is rising
+fcolor = filt[1] > filt[2] ? color.new(#0aff68, 0) : filt[1] < filt[2] ? color.new(#ff0a5a, 0) : color.new(#cccccc, 0)
+greenChannel = filt[1] > filt[2]  // Use confirmed previous bar data for plotting
+
+// === REAL-TIME CHANNEL FOR ENTRIES ===
+// Using current bar data for immediate response
+// This provides maximum speed for altcoin trading
+
+
+
+// === ENTRY AND EXIT CONDITIONS ===
+// Ensure sufficient data for Gaussian Channel calculation and market structure
+sufficientData = bar_index >= (per + 50)  // Increased buffer for stability
+
+
+
+// Entry: Current bar close above upper band (close-based for data reliability)
+// No channel direction restriction - enter on any close above upper band
+longCondition = close > hband and sufficientData and strategy.position_size == 0
+
+// Exit condition (closes all positions) - FAST EXIT using close-based logic
+// Exit when current bar close below upper band
+exitCondition = close < hband and strategy.position_size > 0
+
+// === STRATEGY EXECUTION ===
+if longCondition
+    strategy.entry("Long", strategy.long, alert_message="ALT_ENTRY")
+
+if exitCondition and strategy.position_size > 0
+    strategy.close_all(alert_message="ALT_EXIT")
+
+// === VISUALS ===
+// Plot Filter and Bands
+filtplot = plot(filt, title="Filter", color=fcolor, linewidth=3)
+hbandplot = plot(hband, title="Filtered True Range High Band", color=fcolor)
+lbandplot = plot(lband, title="Filtered True Range Low Band", color=fcolor)
+
+// Channel Fill
+channelFillColor = filt > filt[1] ? color.new(#0aff68, 80) : color.new(#ff0a5a, 80)
+fill(hbandplot, lbandplot, title="Channel Fill", color=channelFillColor)
+
