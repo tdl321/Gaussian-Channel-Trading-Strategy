@@ -18,56 +18,11 @@ warnings.filterwarnings('ignore')
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from strategy.gaussian_filter import GaussianChannelFilter
+from strategy.signals import SignalGenerator
 from strategy.backtest import run_backtrader_backtest, analyze_backtrader_results, plot_backtrader_results
 
 
-def create_test_data(days=200, base_price=45000, volatility=0.02):
-    """Create realistic test data for Gaussian filter testing"""
-    
-    dates = pd.date_range('2024-01-01', periods=days, freq='D')
-    np.random.seed(42)  # For reproducible results
-    
-    # Generate realistic price data
-    prices = []
-    for i in range(days):
-        # Random walk with some trend
-        if i == 0:
-            price = base_price
-        else:
-            change = np.random.normal(0, volatility)  # Daily volatility
-            price = prices[-1] * (1 + change)
-        prices.append(price)
-    
-    # Create OHLCV data
-    data = []
-    for i, (date, close) in enumerate(zip(dates, prices)):
-        # Simple OHLC from close price
-        high = close * (1 + abs(np.random.normal(0, 0.01)))
-        low = close * (1 - abs(np.random.normal(0, 0.01)))
-        open_price = close * (1 + np.random.normal(0, 0.005))
-        volume = np.random.uniform(1000, 10000)
-        
-        data.append({
-            'Date': date,
-            'Open': open_price,
-            'High': high,
-            'Low': low,
-            'Close': close,
-            'Volume': volume
-        })
-    
-    df = pd.DataFrame(data)
-    df.set_index('Date', inplace=True)
-    
-    # Calculate HLC3 and True Range (same as in strategy)
-    df['hlc3'] = (df['High'] + df['Low'] + df['Close']) / 3
-    
-    df['tr1'] = df['High'] - df['Low']
-    df['tr2'] = abs(df['High'] - df['Close'].shift(1))
-    df['tr3'] = abs(df['Low'] - df['Close'].shift(1))
-    df['true_range'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
-    
-    return df
+
 
 
 def load_btc_data():
@@ -111,14 +66,10 @@ def load_btc_data():
     return df
 
 
-def test_gaussian_filter(df=None, poles=6, period=144, multiplier=1.414):
+def test_gaussian_filter(df, poles=6, period=144, multiplier=1.414):
     """Test that Gaussian filter works with live trading parameters"""
     
-    if df is None:
-        df = create_test_data()
-        print("🧪 Testing with synthetic data...")
-    else:
-        print("🧪 Testing with real BTC data...")
+    print("🧪 Testing Gaussian filter...")
     
     # Initialize Gaussian filter with live trading parameters
     gaussian_filter = GaussianChannelFilter(
@@ -153,6 +104,36 @@ def test_gaussian_filter(df=None, poles=6, period=144, multiplier=1.414):
         print(f"   - First valid date: {df.index[valid_mask][0].strftime('%Y-%m-%d')}")
     
     return df, filt_result, hband_result, lband_result, gaussian_filter
+
+
+def test_signal_generation(df, gaussian_filter):
+    """Test signal generation with the Gaussian filter"""
+    
+    print("🎯 Testing signal generation...")
+    
+    # Create config parameters for signal generator
+    config_params = {
+        'POLES': gaussian_filter.poles,
+        'PERIOD': gaussian_filter.period,
+        'MULTIPLIER': gaussian_filter.multiplier
+    }
+    
+    # Initialize signal generator
+    signal_generator = SignalGenerator(gaussian_filter, config_params)
+    
+    # Prepare signals
+    df_with_signals = signal_generator.prepare_signals(df.copy())
+    
+    # Get signal summary
+    signal_summary = signal_generator.get_signal_summary(df_with_signals)
+    
+    print("✅ Signal generation test passed!")
+    print(f"   - Total bars: {signal_summary.get('total_bars', 0)}")
+    print(f"   - Entry signals: {signal_summary.get('entries', 0)}")
+    print(f"   - Exit signals: {signal_summary.get('exits', 0)}")
+    print(f"   - Entry rate: {signal_summary.get('entry_rate', 0)*100:.2f}%")
+    
+    return df_with_signals, signal_generator
 
 
 def visualize_gaussian_filter(df, filt_result, hband_result, lband_result, gaussian_filter, 
@@ -217,6 +198,138 @@ def visualize_gaussian_filter(df, filt_result, hband_result, lband_result, gauss
         plt.show()
     
     plt.close()
+
+
+def visualize_signals(df_with_signals, gaussian_filter, save_plot=True, show_plot=True, title_suffix=""):
+    """Create comprehensive visualization of trading signals"""
+    
+    print("🎨 Creating signal visualization...")
+    
+    # Set up the plot with multiple subplots
+    fig = plt.figure(figsize=(20, 16))
+    
+    # Create grid layout
+    gs = fig.add_gridspec(5, 1, height_ratios=[3, 1, 1, 1, 1], hspace=0.1)
+    
+    # Plot 1: Main price chart with signals
+    ax1 = fig.add_subplot(gs[0])
+    
+    # Plot price data
+    ax1.plot(df_with_signals.index, df_with_signals['Close'], label='BTC Close Price', color='black', alpha=0.8, linewidth=1.5)
+    ax1.plot(df_with_signals.index, df_with_signals['hlc3'], label='HLC3', color='gray', alpha=0.6, linewidth=1)
+    
+    # Plot Gaussian filter and bands (confirmed data for non-repainting)
+    ax1.plot(df_with_signals.index, df_with_signals['filt_confirmed'], label='Gaussian Filter (Confirmed)', color='blue', linewidth=2)
+    ax1.plot(df_with_signals.index, df_with_signals['hband_confirmed'], label='Upper Band (Confirmed)', color='red', alpha=0.7, linewidth=1.5)
+    ax1.plot(df_with_signals.index, df_with_signals['lband_confirmed'], label='Lower Band (Confirmed)', color='red', alpha=0.7, linewidth=1.5)
+    
+    # Fill the band area
+    ax1.fill_between(df_with_signals.index, df_with_signals['hband_confirmed'], df_with_signals['lband_confirmed'], alpha=0.1, color='red', label='Channel')
+    
+    # Plot entry signals - small pinpoint markers
+    entry_points = df_with_signals[df_with_signals['entry_signal']]
+    if len(entry_points) > 0:
+        ax1.scatter(entry_points.index, entry_points['Close'], color='blue', marker='o', s=8, label='Entry Signal', zorder=5, alpha=0.8)
+    
+    # Plot exit signals - small pinpoint markers
+    exit_points = df_with_signals[df_with_signals['exit_signal']]
+    if len(exit_points) > 0:
+        ax1.scatter(exit_points.index, exit_points['Close'], color='magenta', marker='o', s=8, label='Exit Signal', zorder=5, alpha=0.8)
+    
+    # Formatting for main chart
+    ax1.set_title(f'Gaussian Channel Trading Signals{title_suffix}\n'
+                  f'Parameters: {gaussian_filter.poles} poles, {gaussian_filter.period} period, '
+                  f'{gaussian_filter.multiplier} multiplier', 
+                  fontsize=16, fontweight='bold', pad=20)
+    ax1.set_ylabel('Price (USD)', fontsize=12)
+    ax1.legend(loc='upper left', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_yscale('log')  # Log scale for better visualization
+    
+    # Plot 2: Signal indicators
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)
+    
+    # Plot entry and exit signals as binary
+    ax2.plot(df_with_signals.index, df_with_signals['entry_signal'].astype(int), label='Entry Signal', color='green', linewidth=2)
+    ax2.plot(df_with_signals.index, df_with_signals['exit_signal'].astype(int), label='Exit Signal', color='red', linewidth=2)
+    ax2.set_ylabel('Signals', fontsize=12)
+    ax2.legend(loc='upper left', fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(-0.1, 1.1)
+    
+    # Plot 3: Channel conditions
+    ax3 = fig.add_subplot(gs[2], sharex=ax1)
+    
+    # Plot channel conditions
+    ax3.plot(df_with_signals.index, df_with_signals['green_channel'].astype(int), label='Green Channel (Confirmed)', color='green', alpha=0.7, linewidth=1)
+    ax3.plot(df_with_signals.index, df_with_signals['channel_bullish'].astype(int), label='Channel Bullish (Current)', color='blue', alpha=0.7, linewidth=1)
+    ax3.set_ylabel('Channel Conditions', fontsize=12)
+    ax3.legend(loc='upper left', fontsize=10)
+    ax3.grid(True, alpha=0.3)
+    ax3.set_ylim(-0.1, 1.1)
+    
+    # Plot 4: True Range
+    ax4 = fig.add_subplot(gs[3], sharex=ax1)
+    ax4.plot(df_with_signals.index, df_with_signals['true_range'], label='True Range', color='green', alpha=0.7, linewidth=1)
+    ax4.set_ylabel('True Range', fontsize=12)
+    ax4.legend(loc='upper left', fontsize=10)
+    ax4.grid(True, alpha=0.3)
+    
+    # Plot 5: Volume
+    ax5 = fig.add_subplot(gs[4], sharex=ax1)
+    ax5.plot(df_with_signals.index, df_with_signals['Volume'], label='Volume', color='purple', alpha=0.7, linewidth=1)
+    ax5.set_ylabel('Volume', fontsize=12)
+    ax5.set_xlabel('Date', fontsize=12)
+    ax5.legend(loc='upper left', fontsize=10)
+    ax5.grid(True, alpha=0.3)
+    
+    # Format x-axis dates for all subplots
+    for ax in [ax1, ax2, ax3, ax4, ax5]:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+    
+    # Add statistics box
+    signal_summary = {
+        'total_bars': len(df_with_signals),
+        'entries': df_with_signals['entry_signal'].sum(),
+        'exits': df_with_signals['exit_signal'].sum(),
+        'entry_rate': df_with_signals['entry_signal'].sum() / len(df_with_signals) * 100
+    }
+    
+    stats_text = f"""
+Signal Statistics:
+• Total Bars: {signal_summary['total_bars']:,}
+• Entry Signals: {signal_summary['entries']:,}
+• Exit Signals: {signal_summary['exits']:,}
+• Entry Rate: {signal_summary['entry_rate']:.2f}%
+• Green Channel: {df_with_signals['green_channel'].sum():,} bars
+• Bullish Channel: {df_with_signals['channel_bullish'].sum():,} bars
+    """
+    
+    # Add text box with statistics
+    ax1.text(0.02, 0.98, stats_text.strip(), transform=ax1.transAxes, 
+            verticalalignment='top', fontsize=9, fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    # Save plot if requested
+    if save_plot:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"gaussian_signals_{timestamp}.png"
+        save_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results', filename)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"📊 Signal visualization saved to: {save_path}")
+    
+    # Show plot if requested
+    if show_plot:
+        plt.show()
+    
+    plt.close()
+    
+    return fig
 
 
 def create_comprehensive_visualization(df, filt_result, hband_result, lband_result, gaussian_filter):
@@ -397,7 +510,10 @@ def create_zoom_visualizations(df, filt_result, hband_result, lband_result, gaus
 def compare_parameters():
     """Compare different Gaussian filter parameters"""
     
-    df = create_test_data(days=300)
+    print("📊 Loading BTC data for parameter comparison...")
+    df = load_btc_data()
+    # Use last 500 days for clearer comparison
+    df = df.tail(500)
     
     # Test different parameter combinations
     param_sets = [
@@ -527,6 +643,348 @@ def run_backtest_with_debug():
         traceback.print_exc()
 
 
+def simulate_trading_with_position_management(df_with_signals, gaussian_filter):
+    """
+    Simulate trading with position management logic
+    Returns trade log and modified dataframe with actual trades
+    """
+    
+    print("🎯 Simulating trading with position management...")
+    
+    # Initialize trading state
+    in_position = False
+    entry_price = None
+    entry_date = None
+    position_size = 0.0
+    
+    # Trade log
+    trades = []
+    
+    # Copy dataframe to avoid modifying original
+    df_trades = df_with_signals.copy()
+    
+    # Add trade columns
+    df_trades['in_position'] = False
+    df_trades['actual_entry'] = False
+    df_trades['actual_exit'] = False
+    df_trades['entry_price'] = np.nan
+    df_trades['current_pnl'] = 0.0
+    
+    # Simulate trading bar by bar
+    for i in range(len(df_trades)):
+        current_date = df_trades.index[i]
+        current_price = df_trades['Close'].iloc[i]
+        entry_signal = df_trades['entry_signal'].iloc[i]
+        exit_signal = df_trades['exit_signal'].iloc[i]
+        
+        # === ENTRY LOGIC ===
+        if entry_signal and not in_position:
+            # Execute entry
+            in_position = True
+            entry_price = current_price
+            entry_date = current_date
+            position_size = 1.0  # 100% position size
+            
+            # Record trade
+            trade = {
+                'entry_date': entry_date,
+                'entry_price': entry_price,
+                'entry_signal': True,
+                'exit_date': None,
+                'exit_price': None,
+                'exit_signal': False,
+                'pnl': 0.0,
+                'pnl_pct': 0.0,
+                'duration_days': 0
+            }
+            trades.append(trade)
+            
+            # Update dataframe
+            df_trades.loc[current_date, 'in_position'] = True
+            df_trades.loc[current_date, 'actual_entry'] = True
+            df_trades.loc[current_date, 'entry_price'] = entry_price
+            
+            print(f"📈 ENTRY: {current_date.strftime('%Y-%m-%d')} at ${entry_price:,.2f}")
+        
+        # === EXIT LOGIC ===
+        elif exit_signal and in_position:
+            # Execute exit
+            exit_price = current_price
+            pnl = (exit_price - entry_price) / entry_price  # Simple PnL calculation
+            duration_days = (current_date - entry_date).days
+            
+            # Update last trade
+            if trades:
+                trades[-1].update({
+                    'exit_date': current_date,
+                    'exit_price': exit_price,
+                    'exit_signal': True,
+                    'pnl': exit_price - entry_price,
+                    'pnl_pct': pnl * 100,
+                    'duration_days': duration_days
+                })
+            
+            # Reset position
+            in_position = False
+            entry_price = None
+            entry_date = None
+            position_size = 0.0
+            
+            # Update dataframe
+            df_trades.loc[current_date, 'in_position'] = False
+            df_trades.loc[current_date, 'actual_exit'] = True
+            
+            print(f"📉 EXIT: {current_date.strftime('%Y-%m-%d')} at ${exit_price:,.2f} | PnL: {pnl*100:+.2f}% | Duration: {duration_days} days")
+        
+        # === UPDATE CURRENT PnL ===
+        if in_position and entry_price:
+            current_pnl = (current_price - entry_price) / entry_price
+            df_trades.loc[current_date, 'current_pnl'] = current_pnl
+    
+    # Handle open position at end
+    if in_position:
+        print(f"⚠️  OPEN POSITION: Still in position at end of data")
+        if trades:
+            trades[-1]['status'] = 'OPEN'
+    
+    # Calculate trade statistics
+    completed_trades = [t for t in trades if t.get('exit_date') is not None]
+    open_trades = [t for t in trades if t.get('status') == 'OPEN']
+    
+    if completed_trades:
+        total_trades = len(completed_trades)
+        winning_trades = len([t for t in completed_trades if t['pnl'] > 0])
+        losing_trades = len([t for t in completed_trades if t['pnl'] < 0])
+        win_rate = winning_trades / total_trades * 100
+        
+        total_pnl = sum(t['pnl'] for t in completed_trades)
+        avg_pnl = total_pnl / total_trades
+        avg_duration = sum(t['duration_days'] for t in completed_trades) / total_trades
+        
+        print(f"\n📊 TRADE STATISTICS:")
+        print(f"   Total Trades: {total_trades}")
+        print(f"   Winning Trades: {winning_trades}")
+        print(f"   Losing Trades: {losing_trades}")
+        print(f"   Win Rate: {win_rate:.1f}%")
+        print(f"   Total PnL: {total_pnl*100:+.2f}%")
+        print(f"   Average PnL per Trade: {avg_pnl*100:+.2f}%")
+        print(f"   Average Duration: {avg_duration:.1f} days")
+        print(f"   Open Positions: {len(open_trades)}")
+    
+    return df_trades, trades
+
+
+def visualize_actual_trades(df_trades, trades, gaussian_filter, save_plot=True, show_plot=True, title_suffix=""):
+    """Create comprehensive visualization of actual trades with position management"""
+    
+    print("🎨 Creating actual trades visualization...")
+    
+    # Set up the plot with multiple subplots
+    fig = plt.figure(figsize=(20, 16))
+    
+    # Create grid layout
+    gs = fig.add_gridspec(5, 1, height_ratios=[3, 1, 1, 1, 1], hspace=0.1)
+    
+    # Plot 1: Main price chart with actual trades
+    ax1 = fig.add_subplot(gs[0])
+    
+    # Plot price data
+    ax1.plot(df_trades.index, df_trades['Close'], label='BTC Close Price', color='black', alpha=0.8, linewidth=1.5)
+    ax1.plot(df_trades.index, df_trades['hlc3'], label='HLC3', color='gray', alpha=0.6, linewidth=1)
+    
+    # Plot Gaussian filter and bands (confirmed data for non-repainting)
+    ax1.plot(df_trades.index, df_trades['filt_confirmed'], label='Gaussian Filter (Confirmed)', color='blue', linewidth=2)
+    ax1.plot(df_trades.index, df_trades['hband_confirmed'], label='Upper Band (Confirmed)', color='red', alpha=0.7, linewidth=1.5)
+    ax1.plot(df_trades.index, df_trades['lband_confirmed'], label='Lower Band (Confirmed)', color='red', alpha=0.7, linewidth=1.5)
+    
+    # Fill the band area
+    ax1.fill_between(df_trades.index, df_trades['hband_confirmed'], df_trades['lband_confirmed'], alpha=0.1, color='red', label='Channel')
+    
+    # Plot ACTUAL entry points (not raw signals)
+    actual_entries = df_trades[df_trades['actual_entry']]
+    if len(actual_entries) > 0:
+        ax1.scatter(actual_entries.index, actual_entries['Close'], color='green', marker='^', s=100, label='Actual Entry', zorder=5, alpha=0.8)
+    
+    # Plot ACTUAL exit points (not raw signals)
+    actual_exits = df_trades[df_trades['actual_exit']]
+    if len(actual_exits) > 0:
+        ax1.scatter(actual_exits.index, actual_exits['Close'], color='red', marker='v', s=100, label='Actual Exit', zorder=5, alpha=0.8)
+    
+    # Connect entry to exit points for each trade
+    completed_trades = [t for t in trades if t.get('exit_date') is not None]
+    for trade in completed_trades:
+        entry_date = trade['entry_date']
+        exit_date = trade['exit_date']
+        entry_price = trade['entry_price']
+        exit_price = trade['exit_price']
+        
+        # Plot trade line
+        color = 'green' if trade['pnl'] > 0 else 'red'
+        alpha = 0.6 if trade['pnl'] > 0 else 0.4
+        ax1.plot([entry_date, exit_date], [entry_price, exit_price], color=color, alpha=alpha, linewidth=2)
+        
+        # Add PnL annotation
+        mid_date = entry_date + (exit_date - entry_date) / 2
+        mid_price = (entry_price + exit_price) / 2
+        pnl_text = f"{trade['pnl_pct']:+.1f}%"
+        ax1.annotate(pnl_text, (mid_date, mid_price), 
+                    xytext=(5, 5), textcoords='offset points', 
+                    fontsize=8, color=color, fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+    
+    # Formatting for main chart
+    ax1.set_title(f'Gaussian Channel Actual Trades{title_suffix}\n'
+                  f'Parameters: {gaussian_filter.poles} poles, {gaussian_filter.period} period, '
+                  f'{gaussian_filter.multiplier} multiplier', 
+                  fontsize=16, fontweight='bold', pad=20)
+    ax1.set_ylabel('Price (USD)', fontsize=12)
+    ax1.legend(loc='upper left', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_yscale('log')  # Log scale for better visualization
+    
+    # Plot 2: Position status
+    ax2 = fig.add_subplot(gs[1], sharex=ax1)
+    
+    # Plot position status
+    ax2.plot(df_trades.index, df_trades['in_position'].astype(int), label='In Position', color='blue', linewidth=2)
+    ax2.set_ylabel('Position Status', fontsize=12)
+    ax2.legend(loc='upper left', fontsize=10)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(-0.1, 1.1)
+    
+    # Plot 3: Current PnL
+    ax3 = fig.add_subplot(gs[2], sharex=ax1)
+    
+    # Plot current PnL
+    ax3.plot(df_trades.index, df_trades['current_pnl'] * 100, label='Current PnL %', color='purple', linewidth=1.5)
+    ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+    ax3.set_ylabel('Current PnL (%)', fontsize=12)
+    ax3.legend(loc='upper left', fontsize=10)
+    ax3.grid(True, alpha=0.3)
+    
+    # Plot 4: Channel conditions
+    ax4 = fig.add_subplot(gs[3], sharex=ax1)
+    
+    # Plot channel conditions
+    ax4.plot(df_trades.index, df_trades['green_channel'].astype(int), label='Green Channel (Confirmed)', color='green', alpha=0.7, linewidth=1)
+    ax4.plot(df_trades.index, df_trades['channel_bullish'].astype(int), label='Channel Bullish (Current)', color='blue', alpha=0.7, linewidth=1)
+    ax4.set_ylabel('Channel Conditions', fontsize=12)
+    ax4.legend(loc='upper left', fontsize=10)
+    ax4.grid(True, alpha=0.3)
+    ax4.set_ylim(-0.1, 1.1)
+    
+    # Plot 5: Volume
+    ax5 = fig.add_subplot(gs[4], sharex=ax1)
+    ax5.plot(df_trades.index, df_trades['Volume'], label='Volume', color='purple', alpha=0.7, linewidth=1)
+    ax5.set_ylabel('Volume', fontsize=12)
+    ax5.set_xlabel('Date', fontsize=12)
+    ax5.legend(loc='upper left', fontsize=10)
+    ax5.grid(True, alpha=0.3)
+    
+    # Format x-axis dates for all subplots
+    for ax in [ax1, ax2, ax3, ax4, ax5]:
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+        ax.xaxis.set_major_locator(mdates.YearLocator())
+        plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+    
+    # Calculate and display trade statistics
+    completed_trades = [t for t in trades if t.get('exit_date') is not None]
+    open_trades = [t for t in trades if t.get('status') == 'OPEN']
+    
+    if completed_trades:
+        total_trades = len(completed_trades)
+        winning_trades = len([t for t in completed_trades if t['pnl'] > 0])
+        losing_trades = len([t for t in completed_trades if t['pnl'] < 0])
+        win_rate = winning_trades / total_trades * 100
+        
+        total_pnl = sum(t['pnl'] for t in completed_trades)
+        avg_pnl = total_pnl / total_trades
+        avg_duration = sum(t['duration_days'] for t in completed_trades) / total_trades
+        
+        stats_text = f"""
+Trade Statistics:
+• Total Trades: {total_trades}
+• Winning Trades: {winning_trades}
+• Losing Trades: {losing_trades}
+• Win Rate: {win_rate:.1f}%
+• Total PnL: {total_pnl*100:+.2f}%
+• Avg PnL per Trade: {avg_pnl*100:+.2f}%
+• Avg Duration: {avg_duration:.1f} days
+• Open Positions: {len(open_trades)}
+        """
+        
+        # Add text box with statistics
+        ax1.text(0.02, 0.98, stats_text.strip(), transform=ax1.transAxes, 
+                verticalalignment='top', fontsize=9, fontfamily='monospace',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+    plt.tight_layout()
+    
+    # Save plot if requested
+    if save_plot:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"gaussian_actual_trades_{timestamp}.png"
+        save_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results', filename)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"📊 Actual trades visualization saved to: {save_path}")
+    
+    # Show plot if requested
+    if show_plot:
+        plt.show()
+    
+    plt.close()
+    
+    return fig
+
+
+def create_trade_log_report(trades, save_report=True):
+    """Create a detailed trade log report"""
+    
+    print("📋 Creating trade log report...")
+    
+    if not trades:
+        print("No trades to report")
+        return
+    
+    # Create trade log DataFrame
+    trade_data = []
+    for i, trade in enumerate(trades):
+        trade_data.append({
+            'Trade #': i + 1,
+            'Entry Date': trade['entry_date'].strftime('%Y-%m-%d'),
+            'Entry Price': f"${trade['entry_price']:,.2f}",
+            'Exit Date': trade['exit_date'].strftime('%Y-%m-%d') if trade.get('exit_date') else 'OPEN',
+            'Exit Price': f"${trade['exit_price']:,.2f}" if trade.get('exit_price') else 'N/A',
+            'Duration (Days)': trade.get('duration_days', 0),
+            'PnL ($)': f"${trade.get('pnl', 0):,.2f}",
+            'PnL (%)': f"{trade.get('pnl_pct', 0):+.2f}%",
+            'Status': 'COMPLETED' if trade.get('exit_date') else 'OPEN'
+        })
+    
+    trade_df = pd.DataFrame(trade_data)
+    
+    # Print trade log
+    print("\n" + "="*100)
+    print("📊 DETAILED TRADE LOG")
+    print("="*100)
+    print(trade_df.to_string(index=False))
+    print("="*100)
+    
+    # Save trade log if requested
+    if save_report:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"trade_log_{timestamp}.csv"
+        save_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'results', filename)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        # Save as CSV
+        trade_df.to_csv(save_path, index=False)
+        print(f"📄 Trade log saved to: {save_path}")
+    
+    return trade_df
+
+
 def save_visualizations(fig_main, fig_zoom, gaussian_filter):
     """Save the visualizations to files"""
     
@@ -560,108 +1018,117 @@ def main():
     
     # Test options
     print("\n📋 Available Tests:")
-    print("1. Basic Gaussian Filter Test (Synthetic Data)")
-    print("2. Gaussian Filter Test with Real BTC Data")
-    print("3. Full BTC Dataset Visualization")
-    print("4. Parameter Comparison")
+    print("1. Gaussian Filter Test with BTC Data (Channel Only)")
+    print("2. Parameter Comparison (Different filter settings)")
+    print("3. Signal Generation & Visualization (Channel + Signals)")
+    print("4. Position Management & Actual Trades Analysis")
     print("5. Backtest with Debug Mode")
-    print("6. Run All Tests")
+    print("6. Run All Tests (Comprehensive Analysis)")
     
     choice = input("\n🎯 Select test option (1-6): ").strip()
     
     try:
         if choice == "1":
-            # Test 1: Basic functionality with synthetic data
-            print("\n1️⃣ Testing with synthetic data...")
-            df, filt_result, hband_result, lband_result, gaussian_filter = test_gaussian_filter()
+            # Test 1: Gaussian Filter Test with BTC Data (Channel Only)
+            print("\n1️⃣ Loading BTC data...")
+            df = load_btc_data()
             
-            # Visualize synthetic data results
-            print("\n2️⃣ Creating visualization for synthetic data...")
+            print("\n2️⃣ Testing Gaussian filter...")
+            df, filt_result, hband_result, lband_result, gaussian_filter = test_gaussian_filter(df)
+            
+            print("\n3️⃣ Creating channel visualization...")
             visualize_gaussian_filter(df, filt_result, hband_result, lband_result, gaussian_filter, 
-                                    save_plot=True, show_plot=True, title_suffix=" (Synthetic Data)")
+                                    save_plot=True, show_plot=True, title_suffix=" (BTC Data)")
+            
+            print("\n✅ Gaussian filter test completed!")
             
         elif choice == "2":
-            # Test 2: Real BTC data
-            print("\n1️⃣ Testing with real BTC data...")
-            df = load_btc_data()
-            df, filt_result, hband_result, lband_result, gaussian_filter = test_gaussian_filter(df)
-            
-            # Visualize real data results
-            print("\n2️⃣ Creating visualization for real BTC data...")
-            visualize_gaussian_filter(df, filt_result, hband_result, lband_result, gaussian_filter, 
-                                    save_plot=True, show_plot=True, title_suffix=" (Real BTC Data)")
-            
-        elif choice == "3":
-            # Test 3: Full BTC dataset visualization
-            print("\n1️⃣ Loading full BTC dataset...")
-            df = load_btc_data()
-            
-            print("\n2️⃣ Applying Gaussian filter...")
-            df, filt_result, hband_result, lband_result, gaussian_filter = test_gaussian_filter(df)
-            
-            # Create visualizations
-            print("\n3️⃣ Creating visualizations...")
-            
-            # Main comprehensive visualization
-            fig_main = create_comprehensive_visualization(df, filt_result, hband_result, lband_result, gaussian_filter)
-            
-            # Zoomed period visualizations
-            fig_zoom = create_zoom_visualizations(df, filt_result, hband_result, lband_result, gaussian_filter)
-            
-            # Save visualizations
-            print("\n4️⃣ Saving visualizations...")
-            main_path, zoom_path = save_visualizations(fig_main, fig_zoom, gaussian_filter)
-            
-            # Show plots
-            print("\n5️⃣ Displaying visualizations...")
-            plt.show()
-            
-            print("\n✅ Full dataset visualization complete!")
-            print(f"📁 Check the 'results' folder for saved images:")
-            print(f"   • {os.path.basename(main_path)}")
-            print(f"   • {os.path.basename(zoom_path)}")
-            
-        elif choice == "4":
-            # Test 4: Parameter comparison
+            # Test 2: Parameter Comparison
+            print("\n📊 Parameter Comparison Test")
+            print("This test compares different Gaussian filter settings:")
+            print("• 4 poles vs 6 poles vs 8 poles (smoothing sensitivity)")
+            print("• 72 period vs 144 period vs 288 period (sampling period)")
+            print("• Shows how different parameters affect the filter behavior")
             print("\n1️⃣ Creating parameter comparison chart...")
             compare_parameters()
+            
+        elif choice == "3":
+            # Test 3: Signal Generation & Visualization (Channel + Signals)
+            print("\n1️⃣ Loading BTC data...")
+            df = load_btc_data()
+            
+            print("\n2️⃣ Testing Gaussian filter...")
+            df, filt_result, hband_result, lband_result, gaussian_filter = test_gaussian_filter(df)
+            
+            print("\n3️⃣ Testing signal generation...")
+            df_with_signals, signal_generator = test_signal_generation(df, gaussian_filter)
+            
+            print("\n4️⃣ Creating channel + signal visualization...")
+            visualize_signals(df_with_signals, gaussian_filter, save_plot=True, show_plot=True, title_suffix=" (Channel + Signals)")
+            
+            print("\n✅ Signal generation & visualization completed!")
+            
+        elif choice == "4":
+            # Test 4: Position Management & Actual Trades Analysis
+            print("\n1️⃣ Loading BTC data...")
+            df = load_btc_data()
+            
+            print("\n2️⃣ Testing Gaussian filter...")
+            df, filt_result, hband_result, lband_result, gaussian_filter = test_gaussian_filter(df)
+            
+            print("\n3️⃣ Testing signal generation...")
+            df_with_signals, signal_generator = test_signal_generation(df, gaussian_filter)
+            
+            print("\n4️⃣ Simulating trading with position management...")
+            df_trades, trades = simulate_trading_with_position_management(df_with_signals, gaussian_filter)
+            
+            print("\n5️⃣ Creating actual trades visualization...")
+            visualize_actual_trades(df_trades, trades, gaussian_filter, save_plot=True, show_plot=True, title_suffix=" (Position Management)")
+            
+            print("\n6️⃣ Creating trade log report...")
+            create_trade_log_report(trades, save_report=True)
+            
+            print("\n✅ Position management analysis completed!")
             
         elif choice == "5":
             # Test 5: Backtest with debug mode
             run_backtest_with_debug()
             
         elif choice == "6":
-            # Test 6: Run all tests
-            print("\n🔄 Running all tests...")
+            # Test 6: Run All Tests (Comprehensive Analysis)
+            print("\n🔄 Running comprehensive analysis...")
             
-            # Test 1: Synthetic data
-            print("\n1️⃣ Testing with synthetic data...")
-            df_synth, filt_synth, hband_synth, lband_synth, gaussian_filter_synth = test_gaussian_filter()
-            visualize_gaussian_filter(df_synth, filt_synth, hband_synth, lband_synth, gaussian_filter_synth, 
-                                    save_plot=True, show_plot=False, title_suffix=" (Synthetic Data)")
+            # Load BTC data
+            print("\n1️⃣ Loading BTC data...")
+            df = load_btc_data()
             
-            # Test 2: Real BTC data
-            print("\n2️⃣ Testing with real BTC data...")
-            df_real = load_btc_data()
-            df_real, filt_real, hband_real, lband_real, gaussian_filter_real = test_gaussian_filter(df_real)
-            visualize_gaussian_filter(df_real, filt_real, hband_real, lband_real, gaussian_filter_real, 
-                                    save_plot=True, show_plot=False, title_suffix=" (Real BTC Data)")
+            # Test Gaussian filter
+            print("\n2️⃣ Testing Gaussian filter...")
+            df, filt_result, hband_result, lband_result, gaussian_filter = test_gaussian_filter(df)
             
-            # Test 3: Full dataset visualization
-            print("\n3️⃣ Creating full dataset visualization...")
-            fig_main = create_comprehensive_visualization(df_real, filt_real, hband_real, lband_real, gaussian_filter_real)
-            fig_zoom = create_zoom_visualizations(df_real, filt_real, hband_real, lband_real, gaussian_filter_real)
-            main_path, zoom_path = save_visualizations(fig_main, fig_zoom, gaussian_filter_real)
+            # Test signal generation
+            print("\n3️⃣ Testing signal generation...")
+            df_with_signals, signal_generator = test_signal_generation(df, gaussian_filter)
             
-            # Test 4: Parameter comparison
-            print("\n4️⃣ Creating parameter comparison...")
-            compare_parameters()
+            # Create comprehensive visualization with signals
+            print("\n4️⃣ Creating comprehensive visualization with signals...")
+            visualize_signals(df_with_signals, gaussian_filter, save_plot=True, show_plot=True, title_suffix=" (Comprehensive Analysis)")
             
-            # Test 5: Backtest
-            print("\n5️⃣ Running backtest...")
+            # Position management analysis
+            print("\n5️⃣ Simulating trading with position management...")
+            df_trades, trades = simulate_trading_with_position_management(df_with_signals, gaussian_filter)
+            
+            print("\n6️⃣ Creating actual trades visualization...")
+            visualize_actual_trades(df_trades, trades, gaussian_filter, save_plot=True, show_plot=True, title_suffix=" (Comprehensive Analysis)")
+            
+            print("\n7️⃣ Creating trade log report...")
+            create_trade_log_report(trades, save_report=True)
+            
+            # Run backtest
+            print("\n8️⃣ Running backtest...")
             run_backtest_with_debug()
             
-            print("\n✅ All tests completed!")
+            print("\n✅ Comprehensive analysis completed!")
             
         else:
             print("❌ Invalid choice. Please select 1-6.")
