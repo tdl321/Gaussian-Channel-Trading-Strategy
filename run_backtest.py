@@ -97,13 +97,13 @@ def get_strategy_params(symbol):
             'atr_period': 14      # Standard ATR
         }
     elif symbol == 'ETH':
-        # ETH parameters (can be optimized for altcoin-like behavior)
+        # ETH parameters (optimized for altcoin-like behavior)
         return {
-            'poles': 6,           # Same as BTC for now
-            'period': 144,        # Same as BTC for now
-            'multiplier': 1.414,  # Same as BTC for now
+            'poles': 3,           # Faster response (optimized)
+            'period': 72,         # Faster adaptation (optimized)
+            'multiplier': 1.8,    # Wider channel (optimized)
             'position_size_pct': 1.0,  # 100% position size
-            'atr_period': 14      # Standard ATR
+            'atr_period': 7       # Faster volatility (optimized)
         }
     else:
         raise ValueError(f"Unsupported symbol: {symbol}")

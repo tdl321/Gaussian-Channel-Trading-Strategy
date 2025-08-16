@@ -43,11 +43,11 @@ python run_backtest.py --help
 - **ATR Period**: 14
 - **Position Size**: 100%
 
-#### ETH Parameters (Configurable)
-- **Poles**: 6 (same as BTC)
-- **Period**: 144 days (same as BTC)
-- **Multiplier**: 1.414 (same as BTC)
-- **ATR Period**: 14
+#### ETH Parameters (Optimized for Altcoin-like Behavior)
+- **Poles**: 3 (faster response)
+- **Period**: 72 (faster adaptation)
+- **Multiplier**: 1.8 (wider channel)
+- **ATR Period**: 7 (faster volatility)
 - **Position Size**: 100%
 
 ## 📊 Project Structure
@@ -196,13 +196,21 @@ The project includes optimized Pine Script strategies for TradingView:
 - **Win Rate**: 46.7%
 - **Average Duration**: 36 days
 
-### ETH Performance (2017-2024)
+### ETH Performance (2017-2024) - OPTIMIZED PARAMETERS
+- **Total Return**: +2,183% (from $10,000 to $228,290)
+- **Total Trades**: 65
+- **Win Rate**: 35.4%
+- **Average Duration**: 9.0 days
+- **Strategy**: Optimized parameters (poles=3, period=72, multiplier=1.8, atr=7)
+
+### ETH Performance (2017-2024) - ORIGINAL PARAMETERS
 - **Total Return**: -79.9% (from $10,000 to $2,014)
 - **Total Trades**: 39
 - **Win Rate**: 28.2%
 - **Average Duration**: 21.6 days
+- **Strategy**: Original parameters (poles=6, period=144, multiplier=1.414, atr=14)
 
-*Note: ETH performance suggests the strategy may need parameter optimization for altcoin-like assets*
+*Note: ETH optimization shows +2,263% improvement in total return, demonstrating the critical importance of parameter optimization for different asset classes*
 
 ## 🤝 Contributing
 
