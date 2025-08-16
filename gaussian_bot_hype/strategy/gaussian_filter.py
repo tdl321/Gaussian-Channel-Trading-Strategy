@@ -26,7 +26,7 @@ class GaussianChannelFilter:
     Gaussian Channel Filter implementation converted from Pine Script
     """
     
-    def __init__(self, poles=5, period=135, multiplier=2.859):
+    def __init__(self, poles=6, period=144, multiplier=1.414):
         self.poles = poles
         self.period = period
         self.multiplier = multiplier

@@ -196,7 +196,7 @@ class GaussianChannelBot:
             else:
                 logger.info("No current position")
             
-            # Get daily data for strategy calculation (135+ days needed for Gaussian filter)
+            # Get daily data for strategy calculation (144+ days needed for Gaussian filter)
             daily_candles = self.get_daily_data(days=200)
             if not daily_candles:
                 logger.warning("Could not get daily data, skipping cycle")
