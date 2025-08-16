@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from test_gaussian_filter import test_gaussian_filter
 from test_signal_generation import test_signal_generation
+from test_backtest_integration import test_backtest_integration
 
 
 def run_all_tests():
@@ -20,7 +21,7 @@ def run_all_tests():
     print("=" * 50)
     
     tests_passed = 0
-    total_tests = 2
+    total_tests = 3
     
     try:
         print("\n1. Testing Gaussian Filter...")
@@ -33,6 +34,14 @@ def run_all_tests():
     try:
         print("\n2. Testing Signal Generation...")
         test_signal_generation()
+        tests_passed += 1
+        print("   ✅ PASSED")
+    except Exception as e:
+        print(f"   ❌ FAILED: {e}")
+    
+    try:
+        print("\n3. Testing Backtest Integration...")
+        test_backtest_integration()
         tests_passed += 1
         print("   ✅ PASSED")
     except Exception as e:
