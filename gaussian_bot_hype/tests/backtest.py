@@ -1006,26 +1006,36 @@ def run_asset_backtest(symbol='BTC', data_path=None, initial_cash=10000,
             use_config=False  # Use asset-specific parameters instead of config
         )
         
-        # Analyze results
-        print(f"\n📈 Analyzing {symbol} results...")
-        results = analyze_backtrader_results(cerebro)
+        # Get strategy instance for additional metrics
+        strategy = None
+        try:
+            if hasattr(cerebro, 'runstrats') and cerebro.runstrats:
+                strategy_list = cerebro.runstrats[0]
+                if isinstance(strategy_list, list) and len(strategy_list) > 0:
+                    strategy = strategy_list[0]
+        except Exception as e:
+            print(f"Warning: Could not retrieve strategy instance: {e}")
         
         # Print results
         print(f"\n" + "=" * 60)
         print(f"📊 {symbol} BACKTEST RESULTS")
         print("=" * 60)
-        print(f"Initial Capital: ${results['initial_cash']:,.2f}")
-        print(f"Final Value: ${results['final_value']:,.2f}")
-        print(f"Total Return: {results['total_return_pct']:.2f}%")
-        print(f"Total Return: {results['total_return']:.4f}")
+        print(f"Initial Capital: ${initial_cash:,.2f}")
+        print(f"Final Value: ${cerebro.broker.getvalue():,.2f}")
+        print(f"Total Return: {(cerebro.broker.getvalue() - initial_cash) / initial_cash * 100:.2f}%")
         
-        # Get strategy instance for additional metrics
-        strategy = results.get('strategy')
         if strategy is not None:
             try:
                 print(f"\nTrading Statistics:")
                 print(f"   Entry Count: {getattr(strategy, 'entry_count', 'N/A')}")
-                print(f"   Last Entry Price: ${getattr(strategy, 'last_entry_price', 'N/A')}")
+                print(f"   Exit Count: {getattr(strategy, 'exit_count', 'N/A')}")
+                
+                # Check position manager
+                if hasattr(strategy, 'position_manager'):
+                    position_stats = strategy.position_manager.get_trade_statistics()
+                    print(f"   Total Trades: {position_stats.get('total_trades', 'N/A')}")
+                    print(f"   Win Rate: {position_stats.get('win_rate', 'N/A'):.1f}%")
+                    print(f"   Total PnL: ${position_stats.get('total_pnl', 'N/A'):,.2f}")
             except Exception as e:
                 print(f"   Warning: Could not access strategy statistics: {e}")
         else:
@@ -1034,7 +1044,12 @@ def run_asset_backtest(symbol='BTC', data_path=None, initial_cash=10000,
         print(f"\n✅ {symbol} backtest completed successfully!")
         return {
             'cerebro': cerebro,
-            'results': results,
+            'results': {
+                'initial_cash': initial_cash,
+                'final_value': cerebro.broker.getvalue(),
+                'total_return': (cerebro.broker.getvalue() - initial_cash) / initial_cash,
+                'strategy': strategy
+            },
             'success': True
         }
         
