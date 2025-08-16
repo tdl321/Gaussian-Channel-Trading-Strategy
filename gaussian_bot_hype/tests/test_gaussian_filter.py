@@ -66,7 +66,7 @@ def load_btc_data():
     return df
 
 
-def test_gaussian_filter(df, poles=6, period=144, multiplier=1.414):
+def test_gaussian_filter(df, poles=5, period=135, multiplier=2.859):
     """Test that Gaussian filter works with live trading parameters"""
     
     print("🧪 Testing Gaussian filter...")
@@ -517,9 +517,9 @@ def compare_parameters():
     
     # Test different parameter combinations
     param_sets = [
-        (4, 144, 1.414, "4 poles, 144 period"),
-        (6, 144, 1.414, "6 poles, 144 period (current)"),
-        (8, 144, 1.414, "8 poles, 144 period"),
+            (4, 135, 2.859, "4 poles, 135 period"),
+    (5, 135, 2.859, "5 poles, 135 period (optimized)"),
+    (8, 135, 2.859, "8 poles, 135 period"),
         (6, 72, 1.414, "6 poles, 72 period"),
         (6, 288, 1.414, "6 poles, 288 period"),
     ]
@@ -1041,7 +1041,7 @@ def main():
             print("\n📊 Parameter Comparison Test")
             print("This test compares different Gaussian filter settings:")
             print("• 4 poles vs 6 poles vs 8 poles (smoothing sensitivity)")
-            print("• 72 period vs 144 period vs 288 period (sampling period)")
+            print("• 72 period vs 135 period vs 288 period (sampling period)")
             print("• Shows how different parameters affect the filter behavior")
             print("\n1️⃣ Creating parameter comparison chart...")
             compare_parameters()

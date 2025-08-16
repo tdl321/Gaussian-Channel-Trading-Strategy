@@ -19,9 +19,10 @@ SYMBOL = os.getenv('TRADING_SYMBOL', 'BTC')
 LEVERAGE = int(os.getenv('LEVERAGE', '5'))
 
 # === GAUSSIAN CHANNEL STRATEGY PARAMETERS ===
-POLES = int(os.getenv('GAUSSIAN_POLES', '6'))
-PERIOD = int(os.getenv('GAUSSIAN_PERIOD', '144'))
-MULTIPLIER = float(os.getenv('GAUSSIAN_MULTIPLIER', '1.414'))
+# Optimized parameters from Bayesian optimization
+POLES = int(os.getenv('GAUSSIAN_POLES', '5'))
+PERIOD = int(os.getenv('GAUSSIAN_PERIOD', '135'))
+MULTIPLIER = float(os.getenv('GAUSSIAN_MULTIPLIER', '2.859'))
 
 # === TIMING PARAMETERS ===
 TRADING_INTERVAL = int(os.getenv('TRADING_INTERVAL', '3600'))   # 1 hour

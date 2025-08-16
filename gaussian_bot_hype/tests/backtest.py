@@ -231,19 +231,19 @@ class GaussianChannelStrategy(bt.Strategy):
     This strategy implements the Gaussian Channel filter with:
     - Long-only trend following (matches live trading exactly)
     - Dynamic exit based on price closing below upper band
-    - 6 poles, 144 period, 1.414 multiplier (matches live trading)
+    - 5 poles, 135 period, 2.859 multiplier (optimized)
     - Proper position management with leverage
     - Risk management and trade tracking
     - 100% position size per trade
     """
     
     params = (
-        ('poles', 6),                    # Number of poles for Gaussian filter (matches live trading)
-        ('period', 144),                 # Sampling period for Gaussian filter
-        ('multiplier', 1.414),           # Band width multiplier
+        ('poles', 5),                    # Number of poles for Gaussian filter (optimized)
+        ('period', 135),                 # Sampling period for Gaussian filter (optimized)
+        ('multiplier', 2.859),           # Band width multiplier (optimized)
         ('leverage', 5),                 # Leverage multiplier (from config)
         ('position_size_pct', 1.0),      # Position size as percentage of portfolio (100%)
-        ('atr_period', 14),              # ATR calculation period (needed for channel calculation)
+        ('atr_period', 13),              # ATR calculation period (optimized)
         ('stop_loss_pct', 0.05),         # Stop loss percentage (5%)
         ('enable_stop_loss', False),     # Disable stop loss by default
     )
@@ -933,13 +933,13 @@ def get_asset_strategy_params(symbol):
         dict: Strategy parameters
     """
     if symbol == 'BTC':
-        # BTC parameters (original, stable)
+        # BTC parameters (optimized via Bayesian optimization)
         return {
-            'poles': 6,           # Original parameter
-            'period': 144,        # Original parameter  
-            'multiplier': 1.414,  # Original parameter
+            'poles': 5,           # Optimized parameter
+            'period': 135,        # Optimized parameter  
+            'multiplier': 2.859,  # Optimized parameter
             'position_size_pct': 1.0,  # 100% position size
-            'atr_period': 14      # Standard ATR
+            'atr_period': 13      # Optimized ATR
         }
     elif symbol == 'ETH':
         # ETH parameters (optimized for altcoin-like behavior)

@@ -71,17 +71,17 @@ def test_signal_generation():
     
     # Initialize components with live trading parameters
     gaussian_filter = GaussianChannelFilter(
-        poles=6,        # Live trading parameter
-        period=144,     # Live trading parameter
-        multiplier=1.414  # Live trading parameter
+        poles=5,        # Optimized parameter
+        period=135,     # Optimized parameter
+        multiplier=2.859  # Optimized parameter
     )
     
     signal_generator = SignalGenerator(
         gaussian_filter=gaussian_filter,
         config_params={
-            'POLES': 6,
-            'PERIOD': 144,
-            'MULTIPLIER': 1.414
+            'POLES': 5,
+            'PERIOD': 135,
+            'MULTIPLIER': 2.859
         }
     )
     
